@@ -69,6 +69,9 @@ func MigrateFromJSON() {
 			SeriesExcludeRegex     string `json:"seriesExcludeRegex"`
 			VODIncludeRegex        string `json:"vodIncludeRegex"`
 			VODExcludeRegex        string `json:"vodExcludeRegex"`
+			LiveCategoryRegex      string `json:"liveCategoryRegex"`
+			VODCategoryRegex       string `json:"vodCategoryRegex"`
+			SeriesCategoryRegex    string `json:"seriesCategoryRegex"`
 		} `json:"sources"`
 		EPGs []struct {
 			Name  string `json:"name"`
@@ -139,6 +142,8 @@ func MigrateFromJSON() {
 			LiveIncRegex: s.LiveIncludeRegex, LiveExcRegex: s.LiveExcludeRegex,
 			SeriesIncRegex: s.SeriesIncludeRegex, SeriesExcRegex: s.SeriesExcludeRegex,
 			VODIncRegex: s.VODIncludeRegex, VODExcRegex: s.VODExcludeRegex,
+			LiveCatRegex: s.LiveCategoryRegex, VODCatRegex: s.VODCategoryRegex,
+			SeriesCatRegex: s.SeriesCategoryRegex,
 		}); err != nil {
 			logger.Error("Migration: failed to insert source %s: %v", s.Name, err)
 			return

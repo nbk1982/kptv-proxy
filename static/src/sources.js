@@ -144,6 +144,9 @@ function populateSourceForm(source, index) {
     document.getElementById('source-series-exclude-regex').value = source.seriesExcludeRegex || '';
     document.getElementById('source-vod-include-regex').value = source.vodIncludeRegex || '';
     document.getElementById('source-vod-exclude-regex').value = source.vodExcludeRegex || '';
+    document.getElementById('source-live-category-regex').value = source.liveCategoryRegex || '';
+    document.getElementById('source-vod-category-regex').value = source.vodCategoryRegex || '';
+    document.getElementById('source-series-category-regex').value = source.seriesCategoryRegex || '';
 }
 
 /**
@@ -167,6 +170,9 @@ function clearSourceForm() {
     document.getElementById('source-series-exclude-regex').value = '';
     document.getElementById('source-vod-include-regex').value = '';
     document.getElementById('source-vod-exclude-regex').value = '';
+    document.getElementById('source-live-category-regex').value = '';
+    document.getElementById('source-vod-category-regex').value = '';
+    document.getElementById('source-series-category-regex').value = '';
 }
 
 /**
@@ -197,7 +203,10 @@ async function saveSource() {
             seriesIncludeRegex: document.getElementById('source-series-include-regex').value || '',
             seriesExcludeRegex: document.getElementById('source-series-exclude-regex').value || '',
             vodIncludeRegex: document.getElementById('source-vod-include-regex').value || '',
-            vodExcludeRegex: document.getElementById('source-vod-exclude-regex').value || ''
+            vodExcludeRegex: document.getElementById('source-vod-exclude-regex').value || '',
+            liveCategoryRegex: document.getElementById('source-live-category-regex').value || '',
+            vodCategoryRegex: document.getElementById('source-vod-category-regex').value || '',
+            seriesCategoryRegex: document.getElementById('source-series-category-regex').value || ''
         };
 
         if (!source.name || !source.url) {

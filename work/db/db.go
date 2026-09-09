@@ -127,7 +127,10 @@ func initSchema(db *sql.DB) error {
 		series_inc_regex TEXT    NOT NULL DEFAULT '',
 		series_exc_regex TEXT    NOT NULL DEFAULT '',
 		vod_inc_regex    TEXT    NOT NULL DEFAULT '',
-		vod_exc_regex    TEXT    NOT NULL DEFAULT ''
+		vod_exc_regex    TEXT    NOT NULL DEFAULT '',
+		live_cat_regex   TEXT    NOT NULL DEFAULT '',
+		vod_cat_regex    TEXT    NOT NULL DEFAULT '',
+		series_cat_regex TEXT    NOT NULL DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS kp_epgs (
@@ -316,7 +319,62 @@ func initSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err := migrateSourceColumns(db); err != nil {
+		return err
+	}
+
 	return rebuildSeriesEpisodes(db)
+}
+
+// tableColumns returns the set of column names currently present on a table.
+// The rows are fully drained and closed before returning: the write pool is
+// capped at a single connection, so a caller issuing an ALTER while a result
+// set is still open on it would deadlock.
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return cols, nil
+}
+
+// migrateSourceColumns adds any kp_sources column that a newer build expects
+// but an older database file lacks. CREATE TABLE IF NOT EXISTS is a no-op once
+// the table exists, so columns introduced after a database was first created
+// only ever arrive through ALTER TABLE. SQLite accepts ADD COLUMN with NOT NULL
+// when the DEFAULT is a constant, so existing rows backfill in place.
+func migrateSourceColumns(db *sql.DB) error {
+	cols, err := tableColumns(db, "kp_sources")
+	if err != nil {
+		return err
+	}
+
+	for _, col := range []string{"live_cat_regex", "vod_cat_regex", "series_cat_regex"} {
+		if cols[col] {
+			continue
+		}
+		logger.Info("Adding kp_sources column %s...", col)
+		if _, err := db.Exec(fmt.Sprintf(
+			`ALTER TABLE kp_sources ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // rebuildSeriesEpisodes drops a pre-rekey kp_series_episodes and recreates it in

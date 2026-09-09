@@ -1,8 +1,8 @@
 # KPTV Proxy - IPTV Stream Aggregator & Proxy
 
-[![Build Main](https://img.shields.io/github/actions/workflow/status/kpirnie/kptv-proxy/build.yml?branch=main&label=Main&logoColor=white&logo=github&labelColor=000&style=for-the-badge)](https://github.com/kpirnie/kptv-proxy/actions?query=workflow%3A%22Build+and+Push+Docker+Image%22+branch%3Amain)
-[![Build Develop](https://img.shields.io/github/actions/workflow/status/kpirnie/kptv-proxy/build.yml?branch=develop&logoColor=white&label=Develop&logo=github&labelColor=000&style=for-the-badge)](https://github.com/kpirnie/kptv-proxy/actions?query=workflow%3A%22Build+and+Push+Docker+Image%22+branch%3Adevelop)
-[![GitHub Issues](https://img.shields.io/github/issues/kpirnie/kptv-proxy?style=for-the-badge&logo=github&color=006400&logoColor=white&labelColor=000)](https://github.com/kpirnie/kptv-proxy/issues)
+[![Build Main](https://img.shields.io/github/actions/workflow/status/nbk1982/kptv-proxy/build.yml?branch=main&label=Main&logoColor=white&logo=github&labelColor=000&style=for-the-badge)](https://github.com/nbk1982/kptv-proxy/actions?query=workflow%3A%22Build+and+Push+Docker+Image%22+branch%3Amain)
+[![Build Develop](https://img.shields.io/github/actions/workflow/status/nbk1982/kptv-proxy/build.yml?branch=develop&logoColor=white&label=Develop&logo=github&labelColor=000&style=for-the-badge)](https://github.com/nbk1982/kptv-proxy/actions?query=workflow%3A%22Build+and+Push+Docker+Image%22+branch%3Adevelop)
+[![GitHub Issues](https://img.shields.io/github/issues/nbk1982/kptv-proxy?style=for-the-badge&logo=github&color=006400&logoColor=white&labelColor=000)](https://github.com/nbk1982/kptv-proxy/issues)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg?style=for-the-badge&logo=opensourceinitiative&logoColor=white&labelColor=000)](LICENSE)
 
 [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white&style=for-the-badge&labelColor=000)](https://go.dev/)
@@ -272,7 +272,7 @@ XC API:                  http://your-server-ip:PORT/player_api.php
 ```yaml
 services:
   kptv-proxy:
-    image: ghcr.io/kpirnie/kptv-proxy:latest
+    image: ghcr.io/nbk1982/kptv-proxy:latest
     container_name: kptv_proxy
     restart: unless-stopped
     ports:
@@ -302,7 +302,7 @@ For hardware-accelerated transcoding, FFmpeg reads and decodes using your GPU vi
 ```yaml
 services:
   kptv-proxy:
-    image: ghcr.io/kpirnie/kptv-proxy:latest
+    image: ghcr.io/nbk1982/kptv-proxy:latest
     container_name: kptv_proxy
     restart: unless-stopped
     ports:
@@ -416,7 +416,7 @@ Quick copy buttons on each account card:
 - **Add/Edit Sources**: Full configuration interface for IPTV sources
 - **Per-Source Settings**: Custom timeouts, retry logic, connection limits
 - **Custom Headers**: Configure User-Agent, Origin, Referrer per source
-- **Content Filtering**: Per-source regex filters for Live, VOD, and Series content
+- **Content Filtering**: Per-source regex filters for Live, VOD, and Series content, plus category regexes that decide which of the three a stream is
 - **Priority Management**: Reorder sources by priority for failover
 - **XC API Sources**: Set username and password for Xtream Codes API sources
 
@@ -685,6 +685,7 @@ All `/api/*` endpoints require either a valid session cookie or a `Authorization
 
 Each stream is classified as `live`, `vod`, or `series` so filters, XC catalog placement, and account content toggles apply correctly.
 
+- **Category regexes (per source)**: `seriesCategoryRegex`, `vodCategoryRegex`, and `liveCategoryRegex` override the inferred type whenever they match. Each is tested against the stream name, its `group-title`/`tvg-group`, and its URL as separate subjects, so `^` and `$` anchor to a single field. Subjects are lowercased before matching and the patterns themselves are compiled as written, so patterns must be in lowercase — one containing uppercase letters never matches. Series is tested first, then VOD, then live, and the first match wins. An entry matching none of the three keeps the classification described in the bullets below. The decided type is stored on the stream, so filtering and catalog placement can no longer disagree.
 - **XC sources**: content type comes directly from which XC API endpoint the entry was fetched from (`get_live_streams`, `get_vod_streams`, `get_series`) — not guessed. A live entry whose name contains `24/7` is still reclassified as series, matching the pattern used for M3U sources.
 - **M3U sources**: content type is inferred from the stream name, URL, and `group-title`/`tvg-group` attributes, in that order.
 - **group-title on XC sources**: reflects the provider's own category name for that stream, not the literal content type. A category with no usable name falls back to `live`, `vod`, or `series`.
@@ -729,14 +730,17 @@ Each stream is classified as `live`, `vod`, or `series` so filters, XC catalog p
 | `userAgent` | No | Custom User-Agent header | `"VLC/3.0.18"` |
 | `reqOrigin` | No | Custom Origin header | `"https://provider.com"` |
 | `reqReferrer` | No | Custom Referrer header | `"https://provider.com/player"` |
-| `liveIncludeRegex` | No | Only include live streams matching pattern | `".*USA.*"` |
+| `liveIncludeRegex` | No | Only include live streams matching pattern | `".*usa.*"` |
 | `liveExcludeRegex` | No | Exclude live streams matching pattern | `".*adult.*"` |
 | `seriesIncludeRegex` | No | Only include series matching pattern | `""` |
 | `seriesExcludeRegex` | No | Exclude series matching pattern | `""` |
 | `vodIncludeRegex` | No | Only include VOD matching pattern | `""` |
 | `vodExcludeRegex` | No | Exclude VOD matching pattern | `""` |
+| `liveCategoryRegex` | No | Classify matching entries as live, overriding the inferred type | `".*/live/.*"` |
+| `vodCategoryRegex` | No | Classify matching entries as VOD, overriding the inferred type | `".*/movie/.*"` |
+| `seriesCategoryRegex` | No | Classify matching entries as series, overriding the inferred type; tested first | `".*/series/.*"` |
 
-For XC sources, the importer fetches live, series, and VOD catalogs plus each type's category list. `group-title` is set from the provider's category name where available, falling back to the content type name. The live/series/VOD include and exclude regexes are applied after the full catalog is fetched, so changing a filter takes effect on the next import without a re-fetch of the provider's data. Editing a source's filters also invalidates any previously compiled filter for that source immediately, rather than waiting for a restart.
+For XC sources, the importer fetches live, series, and VOD catalogs plus each type's category list. `group-title` is set from the provider's category name where available, falling back to the content type name. The live/series/VOD include and exclude regexes are applied after the full catalog is fetched, so changing a filter takes effect on the next import without a re-fetch of the provider's data; the category regexes are applied at the same point, so re-typing entries likewise takes effect on the next import without re-fetching. Those six include and exclude regexes previously matched the stream name only. They now match the stream name, its `group-title`/`tvg-group` labels, and its URL, each as a separate lowercased subject, so `^` and `$` anchor to one field rather than to a concatenation of all of them and a pattern containing uppercase letters no longer matches. Editing a source's filters also invalidates any previously compiled filter for that source immediately, rather than waiting for a restart.
 
 ### XC Output Account Settings
 
@@ -912,6 +916,7 @@ Format: M3U8/HLS
 - **A failed XC fetch is no longer cached.** If any of an XC source's six requests (live/series/vod streams plus their three category lists) fails, that import cycle isn't cached at all — it retries on the next `importRefreshInterval` instead of serving a partial catalog for the full cache lifetime.
 - **XC VOD is now imported.** If VOD content wasn't showing up from an XC source before, check `vodIncludeRegex`/`vodExcludeRegex` and the target XC output account's `enableVOD` setting after upgrading.
 - **Group-filtered playlists for XC sources use provider category names now**, not `live`/`vod`/`series`. Update any saved `/pl/{username}/{password}/{group}` links accordingly — see Common Issues & Solutions above.
+- **Include and exclude regexes match more than the stream name now.** All six are tested against the stream name, its `group-title`/`tvg-group`, and its URL, each lowercased first, so an existing pattern may keep or drop entries it previously ignored, and one containing uppercase letters (for example `.*USA.*`) stops matching — rewrite it in lowercase.
 
 ## Supporting KPTV Proxy
 

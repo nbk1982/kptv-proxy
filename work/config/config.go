@@ -83,6 +83,9 @@ type SourceConfig struct {
 	SeriesExcludeRegex     string        `json:"seriesExcludeRegex,omitempty"`
 	VODIncludeRegex        string        `json:"vodIncludeRegex,omitempty"`
 	VODExcludeRegex        string        `json:"vodExcludeRegex,omitempty"`
+	LiveCategoryRegex      string        `json:"liveCategoryRegex,omitempty"`
+	VODCategoryRegex       string        `json:"vodCategoryRegex,omitempty"`
+	SeriesCategoryRegex    string        `json:"seriesCategoryRegex,omitempty"`
 	EPGURL                 string        `json:"-"`
 }
 
@@ -128,6 +131,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		SeriesExcludeRegex     string `json:"seriesExcludeRegex"`
 		VODIncludeRegex        string `json:"vodIncludeRegex"`
 		VODExcludeRegex        string `json:"vodExcludeRegex"`
+		LiveCategoryRegex      string `json:"liveCategoryRegex"`
+		VODCategoryRegex       string `json:"vodCategoryRegex"`
+		SeriesCategoryRegex    string `json:"seriesCategoryRegex"`
 	}
 
 	aux := &struct {
@@ -220,6 +226,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 			SeriesExcludeRegex:     s.SeriesExcludeRegex,
 			VODIncludeRegex:        s.VODIncludeRegex,
 			VODExcludeRegex:        s.VODExcludeRegex,
+			LiveCategoryRegex:      s.LiveCategoryRegex,
+			VODCategoryRegex:       s.VODCategoryRegex,
+			SeriesCategoryRegex:    s.SeriesCategoryRegex,
 		}
 		if s.MaxStreamTimeout != "" {
 			if c.Sources[i].MaxStreamTimeout, err = time.ParseDuration(s.MaxStreamTimeout); err != nil {
@@ -423,6 +432,9 @@ func loadSourcesFromDB() ([]SourceConfig, error) {
 			SeriesExcludeRegex:     r.SeriesExcRegex,
 			VODIncludeRegex:        r.VODIncRegex,
 			VODExcludeRegex:        r.VODExcRegex,
+			LiveCategoryRegex:      r.LiveCatRegex,
+			VODCategoryRegex:       r.VODCatRegex,
+			SeriesCategoryRegex:    r.SeriesCatRegex,
 		})
 	}
 	return sources, nil
@@ -549,6 +561,9 @@ func syncSourcesToDB(sources []SourceConfig) error {
 			SeriesExcRegex: s.SeriesExcludeRegex,
 			VODIncRegex:    s.VODIncludeRegex,
 			VODExcRegex:    s.VODExcludeRegex,
+			LiveCatRegex:   s.LiveCategoryRegex,
+			VODCatRegex:    s.VODCategoryRegex,
+			SeriesCatRegex: s.SeriesCategoryRegex,
 		}); err != nil {
 			return err
 		}

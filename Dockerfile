@@ -29,6 +29,17 @@ RUN VERSION="v$(date -u +%Y%m%d%H.%M)" && \
 # Final stage - keep all GPU drivers
 FROM docker.io/debian:trixie-slim
 
+# Image provenance. org.opencontainers.image.source is what links the published
+# package to its repository on GHCR; override IMAGE_SOURCE at build time to
+# retarget the image at a different fork.
+ARG IMAGE_SOURCE=https://github.com/nbk1982/kptv-proxy
+LABEL org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.opencontainers.image.url="${IMAGE_SOURCE}" \
+      org.opencontainers.image.documentation="${IMAGE_SOURCE}/blob/main/readme.md" \
+      org.opencontainers.image.title="kptv-proxy" \
+      org.opencontainers.image.description="IPTV proxy with per-source content classification and filtering, EPG merging and Xtream Codes output" \
+      org.opencontainers.image.licenses="MIT"
+
 # Install curl and necessities curl in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

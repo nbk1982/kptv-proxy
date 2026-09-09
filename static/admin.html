@@ -816,6 +816,31 @@
                         <div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
+                                    <label class="block text-sm font-medium mb-1">Live Category Regex</label>
+                                    <input
+                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
+                                        type="text" id="source-live-category-regex" placeholder="^(canais|tv)">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-1">VOD Category Regex</label>
+                                    <input
+                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
+                                        type="text" id="source-vod-category-regex" placeholder="(filmes|movies)">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-1">Series Category Regex</label>
+                                    <input
+                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
+                                        type="text" id="source-series-category-regex" placeholder="(series|s[0-9]{2}e[0-9]{2})">
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-4 mb-4">Category patterns decide whether an entry is
+                            Live, VOD or Series; the include/exclude patterns below decide which of those entries are kept.
+                            All of them are matched against the stream name, its group and its URL. Series wins over VOD,
+                            which wins over Live; an entry matching none of them keeps the importer's own classification.
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
                                     <label class="block text-sm font-medium mb-1">Live Include Regex</label>
                                     <input
                                         class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"

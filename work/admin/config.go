@@ -53,6 +53,9 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 			SeriesExcludeRegex     string `json:"seriesExcludeRegex"`
 			VODIncludeRegex        string `json:"vodIncludeRegex"`
 			VODExcludeRegex        string `json:"vodExcludeRegex"`
+			LiveCategoryRegex      string `json:"liveCategoryRegex"`
+			VODCategoryRegex       string `json:"vodCategoryRegex"`
+			SeriesCategoryRegex    string `json:"seriesCategoryRegex"`
 		}
 		sources := make([]sourceOut, len(cfg.Sources))
 		for i := range cfg.Sources {
@@ -70,6 +73,8 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 				LiveIncludeRegex: s.LiveIncludeRegex, LiveExcludeRegex: s.LiveExcludeRegex,
 				SeriesIncludeRegex: s.SeriesIncludeRegex, SeriesExcludeRegex: s.SeriesExcludeRegex,
 				VODIncludeRegex: s.VODIncludeRegex, VODExcludeRegex: s.VODExcludeRegex,
+				LiveCategoryRegex: s.LiveCategoryRegex, VODCategoryRegex: s.VODCategoryRegex,
+				SeriesCategoryRegex: s.SeriesCategoryRegex,
 			}
 		}
 

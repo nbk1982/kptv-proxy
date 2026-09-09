@@ -92,7 +92,10 @@
           "seriesIncludeRegex":     { "type": "string" },
           "seriesExcludeRegex":     { "type": "string" },
           "vodIncludeRegex":        { "type": "string" },
-          "vodExcludeRegex":        { "type": "string" }
+          "vodExcludeRegex":        { "type": "string" },
+          "liveCategoryRegex":      { "type": "string" },
+          "vodCategoryRegex":       { "type": "string" },
+          "seriesCategoryRegex":    { "type": "string" }
         }
       },
       "EPG": {

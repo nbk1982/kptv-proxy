@@ -31,6 +31,9 @@ type Source struct {
 	SeriesExcRegex string
 	VODIncRegex    string
 	VODExcRegex    string
+	LiveCatRegex   string
+	VODCatRegex    string
+	SeriesCatRegex string
 }
 
 // GetAllSources returns every source row ordered by sort_order ascending.
@@ -40,7 +43,8 @@ func GetAllSources() ([]Source, error) {
 		       max_stream_to, retry_delay, max_retries, max_failures,
 		       min_data_size, user_agent, req_origin, req_referer,
 		       live_inc_regex, live_exc_regex, series_inc_regex,
-		       series_exc_regex, vod_inc_regex, vod_exc_regex
+		       series_exc_regex, vod_inc_regex, vod_exc_regex,
+		       live_cat_regex, vod_cat_regex, series_cat_regex
 		FROM kp_sources
 		ORDER BY sort_order ASC`)
 	if err != nil {
@@ -59,7 +63,8 @@ func GetSource(id int64) (Source, error) {
 		       max_stream_to, retry_delay, max_retries, max_failures,
 		       min_data_size, user_agent, req_origin, req_referer,
 		       live_inc_regex, live_exc_regex, series_inc_regex,
-		       series_exc_regex, vod_inc_regex, vod_exc_regex
+		       series_exc_regex, vod_inc_regex, vod_exc_regex,
+		       live_cat_regex, vod_cat_regex, series_cat_regex
 		FROM kp_sources WHERE id = ?`, id)
 
 	var s Source
@@ -77,13 +82,15 @@ func InsertSource(s Source) (int64, error) {
 			(name, uri, uname, pword, sort_order, max_cnx, max_stream_to,
 			 retry_delay, max_retries, max_failures, min_data_size, user_agent,
 			 req_origin, req_referer, live_inc_regex, live_exc_regex,
-			 series_inc_regex, series_exc_regex, vod_inc_regex, vod_exc_regex)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 series_inc_regex, series_exc_regex, vod_inc_regex, vod_exc_regex,
+			 live_cat_regex, vod_cat_regex, series_cat_regex)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
 		s.LiveIncRegex, s.LiveExcRegex, s.SeriesIncRegex, s.SeriesExcRegex,
-		s.VODIncRegex, s.VODExcRegex,
+		s.VODIncRegex, s.VODExcRegex, s.LiveCatRegex, s.VODCatRegex,
+		s.SeriesCatRegex,
 	)
 	if err != nil {
 		logger.Error("{db/sources - InsertSource} %v", err)
@@ -100,13 +107,15 @@ func UpdateSource(s Source) error {
 			max_stream_to=?, retry_delay=?, max_retries=?, max_failures=?,
 			min_data_size=?, user_agent=?, req_origin=?, req_referer=?,
 			live_inc_regex=?, live_exc_regex=?, series_inc_regex=?,
-			series_exc_regex=?, vod_inc_regex=?, vod_exc_regex=?
+			series_exc_regex=?, vod_inc_regex=?, vod_exc_regex=?,
+			live_cat_regex=?, vod_cat_regex=?, series_cat_regex=?
 		WHERE id=?`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
 		s.LiveIncRegex, s.LiveExcRegex, s.SeriesIncRegex, s.SeriesExcRegex,
-		s.VODIncRegex, s.VODExcRegex, s.ID,
+		s.VODIncRegex, s.VODExcRegex, s.LiveCatRegex, s.VODCatRegex,
+		s.SeriesCatRegex, s.ID,
 	)
 	if err != nil {
 		logger.Error("{db/sources - UpdateSource} id=%d: %v", s.ID, err)
@@ -134,6 +143,7 @@ func scanSources(rows *sql.Rows) ([]Source, error) {
 			&s.MaxRetries, &s.MaxFailures, &s.MinDataSize, &s.UserAgent,
 			&s.ReqOrigin, &s.ReqReferer, &s.LiveIncRegex, &s.LiveExcRegex,
 			&s.SeriesIncRegex, &s.SeriesExcRegex, &s.VODIncRegex, &s.VODExcRegex,
+			&s.LiveCatRegex, &s.VODCatRegex, &s.SeriesCatRegex,
 		); err != nil {
 			logger.Error("{db/sources - scanSources} scan failed: %v", err)
 			return nil, err
@@ -151,5 +161,6 @@ func scanSource(row *sql.Row, s *Source) error {
 		&s.MaxRetries, &s.MaxFailures, &s.MinDataSize, &s.UserAgent,
 		&s.ReqOrigin, &s.ReqReferer, &s.LiveIncRegex, &s.LiveExcRegex,
 		&s.SeriesIncRegex, &s.SeriesExcRegex, &s.VODIncRegex, &s.VODExcRegex,
+		&s.LiveCatRegex, &s.VODCatRegex, &s.SeriesCatRegex,
 	)
 }
