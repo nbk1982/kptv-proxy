@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main", "develop"]
+  # Called by build.yml and release.yml so nothing is published until this
+  # passes.
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version string to stamp into the binary. Release builds pass the git
+          tag; everything else falls back to a UTC timestamp.
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Vet, build and test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: CGO_ENABLED=0 go build ./...
+
+      # The race detector needs cgo, so this build is separate from the
+      # CGO_ENABLED=0 one the image actually ships.
+      - name: go test
+        run: go test -race ./...
+
+  binary:
+    name: Build linux/amd64 binary
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same ldflags the Dockerfile uses, so a binary from CI reports the same
+      # version triple as one baked into the image.
+      - name: Build
+        run: |
+          VERSION="${{ inputs.version }}"
+          [ -n "$VERSION" ] || VERSION="v$(date -u +%Y%m%d%H.%M)"
+          BUILDDATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          COMMIT="$(git rev-parse --short HEAD)"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -ldflags="-s -w -X kptv-proxy/work/app.Version=$VERSION -X kptv-proxy/work/app.BuildDate=$BUILDDATE -X kptv-proxy/work/app.Commit=$COMMIT" \
+            -trimpath -o kptv-proxy .
+          # main.go has no flag parsing, so don't execute the binary here --
+          # it would start the server and hang the job. `go version -m` does
+          # not record -ldflags either, so confirm the stamp by finding the
+          # injected string in the binary itself.
+          grep -a -q -- "$VERSION" kptv-proxy \
+            || { echo "version string $VERSION not found in binary"; exit 1; }
+          echo "built $VERSION ($COMMIT), $(stat -c %s kptv-proxy) bytes"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: kptv-proxy-linux-amd64-${{ github.sha }}
+          path: kptv-proxy
+          if-no-files-found: error
+          retention-days: 14
