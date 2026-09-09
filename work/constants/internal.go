@@ -1,6 +1,27 @@
 package constants
 
-import "time"
+import (
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// dataDirEnv names the environment variable that overrides the data directory.
+const dataDirEnv = "KPTV_DATA_DIR"
+
+// defaultDataDir is the container volume mount used by the Docker image.
+const defaultDataDir = "/settings"
+
+// dataDir returns the directory that holds the SQLite database, the EPG disk
+// cache and any legacy config.json. It defaults to the container mount point so
+// existing deployments are unaffected, and honours KPTV_DATA_DIR so the binary
+// can run outside Docker where /settings does not exist.
+func dataDir() string {
+	if d := os.Getenv(dataDirEnv); d != "" {
+		return d
+	}
+	return defaultDataDir
+}
 
 // InternalConstants defines all hardcoded operational values for the application.
 // Modify values here rather than hunting through the codebase.
@@ -303,6 +324,7 @@ type InternalConstants struct {
 	// -------------------------------------------------------------------------
 	// work/db/db.go — Get()
 	// -------------------------------------------------------------------------
+	DataDir      string // Directory holding the database, EPG cache and legacy config.json
 	DatabasePath string // Filesystem path to the SQLite database file
 }
 
@@ -432,7 +454,7 @@ var Internal = InternalConstants{
 	EPGSourceTimeout:   5 * time.Minute,
 	EPGGlobalTimeout:   15 * time.Minute,
 	EPGDiskTTL:         12 * time.Hour,
-	EPGCachePath:       "/settings/kptv-epg",
+	EPGCachePath:       filepath.Join(dataDir(), "kptv-epg"),
 
 	// -------------------------------------------------------------------------
 	// Stream failure
@@ -514,5 +536,6 @@ var Internal = InternalConstants{
 	ServerReadHeaderTO: 10 * time.Second,
 	ServerReadTO:       60 * time.Second,
 	ServerIdleTO:       120 * time.Second,
-	DatabasePath:       "/settings/kptv.db",
+	DataDir:            dataDir(),
+	DatabasePath:       filepath.Join(dataDir(), "kptv.db"),
 }

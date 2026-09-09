@@ -263,6 +263,16 @@ Group Filtered Playlist: http://your-server-ip:PORT/pl/{username}/{password}/{gr
 XC API:                  http://your-server-ip:PORT/player_api.php
 ```
 
+### Running the binary outside Docker
+
+The prebuilt binary stores the SQLite database and the EPG disk cache in `/settings`, which is the volume mount used by the container image. On a bare host that directory usually does not exist, so point `KPTV_DATA_DIR` at a writable path instead:
+
+```bash
+KPTV_DATA_DIR=/var/lib/kptv ./kptv
+```
+
+The directory is created on startup if missing. Unset, it falls back to `/settings` so existing Docker deployments are unaffected.
+
 > **Note**: `{group}` must match a channel's `group-title`. For XC sources this is the provider's own category name (e.g. `USA | ENTERTAINMENT`), not the content type — `live`, `vod`, and `series` are no longer valid group filters for XC-sourced channels unless a provider happens to name a category that.
 
 ## Docker Compose Examples

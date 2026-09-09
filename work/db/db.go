@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"kptv-proxy/work/constants"
 	"kptv-proxy/work/logger"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -32,10 +34,18 @@ func dsn() string {
 }
 
 // Get returns the singleton database connection, initializing it on first call.
-// The database file is created at /settings/kptv.db if it does not exist.
+// The database file and its parent directory are created if they do not exist.
 // Foreign key enforcement is enabled at the connection level.
 func Get() *sql.DB {
 	once.Do(func() {
+		// sqlite will not create missing parent directories, so the data dir is
+		// materialized first; outside Docker it usually does not exist yet.
+		dir := filepath.Dir(constants.Internal.DatabasePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			logger.Error("{db - Get} Failed to create data directory %s: %v", dir, err)
+			panic(err)
+		}
+
 		var err error
 		instance, err = sql.Open("sqlite3", dsn())
 		if err != nil {

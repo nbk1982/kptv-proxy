@@ -4,12 +4,16 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"kptv-proxy/work/constants"
 	"kptv-proxy/work/logger"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-const configJSONPath = "/settings/config.json"
+// configJSONPath is the legacy settings file, resolved against the configured
+// data directory so it follows KPTV_DATA_DIR like the database itself.
+var configJSONPath = filepath.Join(constants.Internal.DataDir, "config.json")
 
 // MigrateFromJSON checks if kp_settings is empty and config.json exists.
 // If so, it reads config.json and imports all settings into SQLite, then
