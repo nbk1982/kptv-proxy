@@ -79,7 +79,6 @@ type InternalConstants struct {
 	// work/restream/restream.go — streamFallbackVideo() / streamLocalFallback()
 	// -------------------------------------------------------------------------
 	OversizedBufferMultiplier    int           // Multiplier used to detect and discard oversized buffers in the pool
-	FallbackVideoPath            string        // Container-local path to the fallback .ts file streamed when all sources fail
 	FallbackVideoLoopDelay       time.Duration // Pause between fallback video loop iterations
 	FallbackRetryInterval        time.Duration // How long to loop fallback video before returning to retry real sources
 	FallbackVideoPaceBytesPerSec int64         // Throttle rate for fallback video distribution, approximating realtime playback
@@ -384,7 +383,6 @@ var Internal = InternalConstants{
 	// Fallback video
 	// -------------------------------------------------------------------------
 	OversizedBufferMultiplier:    4,
-	FallbackVideoPath:            "/static/loading.ts",
 	FallbackVideoLoopDelay:       1 * time.Second,
 	FallbackRetryInterval:        60 * time.Second,
 	FallbackVideoPaceBytesPerSec: 1024 * 1024, // 1MB/s ≈ 8Mbps, comfortable for a typical SD/HD loading clip

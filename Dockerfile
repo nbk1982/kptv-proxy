@@ -54,16 +54,13 @@ RUN groupadd --system --gid 107 render \
     && groupadd --gid 1000 kptv \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash kptv \
     && usermod -a -G video,render kptv \
-    && mkdir -p /dev/dri /settings /static \
+    && mkdir -p /dev/dri /settings \
     && chown -R kptv:kptv /settings \
     && chmod 775 /settings
 
+# The admin interface and the offline clip are embedded in the binary, so
+# nothing needs to be copied into /static.
 COPY --from=builder /app/kptv-proxy /usr/local/bin/kptv-proxy
-COPY --from=builder /app/static/*.html /static/
-COPY --from=builder /app/static/openapi.json /static/
-COPY --from=builder /app/static/admin.css /static/
-COPY --from=builder /app/static/admin.js /static/
-COPY loading.ts /static/
 
 WORKDIR /workspace
 USER kptv

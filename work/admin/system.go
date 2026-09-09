@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"kptv-proxy/work/constants"
 	"kptv-proxy/work/proxy"
+	"kptv-proxy/work/webui"
 	"net/http"
 	"time"
 )
@@ -82,5 +83,5 @@ func handleToggleWatcher(sp *proxy.StreamProxy) http.HandlerFunc {
 
 // handleAdminInterface serves the main admin HTML page.
 func handleAdminInterface(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "/static/admin.html")
+	webui.ServeFile(w, r, "admin.html")
 }

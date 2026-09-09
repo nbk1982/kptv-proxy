@@ -273,6 +273,28 @@ KPTV_DATA_DIR=/var/lib/kptv ./kptv
 
 The directory is created on startup if missing. Unset, it falls back to `/settings` so existing Docker deployments are unaffected.
 
+### Running as a systemd service
+
+[`packaging/systemd/kptv.service`](packaging/systemd/kptv.service) runs the binary as an unprivileged `kptv` user. It sets `StateDirectory=kptv` and `KPTV_DATA_DIR=/var/lib/kptv`, so systemd creates the data directory with the right ownership on every start.
+
+```bash
+# Service user and install location
+adduser --system --home /srv/kptv kptv
+install -d -o kptv -g nogroup /srv/kptv
+
+# Binary — pick the version from the releases page
+VERSION=v2.0.2
+wget -O /srv/kptv/kptv "https://github.com/nbk1982/kptv-proxy/releases/download/$VERSION/kptv-proxy_${VERSION}_linux_amd64"
+chmod 755 /srv/kptv/kptv
+
+# Unit
+wget -O /etc/systemd/system/kptv.service https://raw.githubusercontent.com/nbk1982/kptv-proxy/main/packaging/systemd/kptv.service
+systemctl daemon-reload
+systemctl enable --now kptv
+```
+
+Check it came up with `systemctl status kptv` and follow the logs with `journalctl -u kptv -f`. After replacing the binary during an upgrade, remember to `systemctl restart kptv`.
+
 > **Note**: `{group}` must match a channel's `group-title`. For XC sources this is the provider's own category name (e.g. `USA | ENTERTAINMENT`), not the content type — `live`, `vod`, and `series` are no longer valid group filters for XC-sourced channels unless a provider happens to name a category that.
 
 ## Docker Compose Examples

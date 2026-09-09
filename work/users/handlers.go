@@ -3,6 +3,7 @@ package users
 import (
 	"encoding/json"
 	"kptv-proxy/work/constants"
+	"kptv-proxy/work/webui"
 	"net/http"
 	"strconv"
 	"strings"
@@ -98,7 +99,7 @@ func HandleRegisterPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	http.ServeFile(w, r, "/static/register.html")
+	webui.ServeFile(w, r, "register.html")
 }
 
 // HandleRegister processes the registration form submission.
@@ -166,7 +167,7 @@ func HandleLoginPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.ServeFile(w, r, "/static/login.html")
+	webui.ServeFile(w, r, "login.html")
 }
 
 // HandleLogin processes the login form submission.

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -16,10 +18,27 @@ import (
 	"kptv-proxy/work/logger"
 	"kptv-proxy/work/users"
 	"kptv-proxy/work/utils"
+	"kptv-proxy/work/webui"
 	//_ "net/http/pprof"
 )
 
+// The admin interface and the offline clip are embedded so a release binary
+// runs standalone; the Docker image no longer needs them copied into /static.
+//
+//go:embed static
+var staticAssets embed.FS
+
+//go:embed loading.ts
+var fallbackVideo []byte
+
 func main() {
+
+	// Point the web layer at the embedded assets before any route is registered.
+	assets, err := fs.Sub(staticAssets, "static")
+	if err != nil {
+		panic(err)
+	}
+	webui.Init(assets, fallbackVideo)
 
 	// Initialize the SQLite database before loading config.
 	db.Get()

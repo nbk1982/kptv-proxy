@@ -15,8 +15,8 @@ import (
 	"kptv-proxy/work/parser"
 	"kptv-proxy/work/stream"
 	"kptv-proxy/work/types"
+	"kptv-proxy/work/webui"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,15 +25,6 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v3"
 	"go.uber.org/ratelimit"
-)
-
-// fallback video cache variables
-// these will be used to cache the local fallback video when it's available
-// and necessary to do so
-var (
-	fallbackVideoCache     []byte
-	fallbackVideoCacheMu   sync.RWMutex
-	fallbackVideoCachePath string
 )
 
 // streamBufferPool provides a sync.Pool for reusing 32KB buffers during stream
@@ -1265,9 +1256,6 @@ func (r *Restream) trackStreamStart() time.Time {
 
 // streamFallbackVideo streams the offline video in a loop when all streams fail
 func (r *Restream) streamFallbackVideo() {
-	// Local path inside container - copy loading.ts here
-	fallbackPath := constants.Internal.FallbackVideoPath
-
 	logger.Debug("{restream/restream - streamFallbackVideo} Channel %s: Starting fallback video loop", r.Channel.Name)
 
 	// ensure buffer is valid before attempting fallback streaming —
@@ -1302,8 +1290,8 @@ func (r *Restream) streamFallbackVideo() {
 
 		logger.Debug("{restream/restream - streamFallbackVideo} Channel %s: Starting fallback video playback for %d clients", r.Channel.Name, clientCount)
 
-		// Stream the local fallback video
-		r.streamLocalFallback(fallbackPath)
+		// Stream the offline clip
+		r.streamLocalFallback()
 
 		// Brief pause before restarting loop
 		select {
@@ -1315,37 +1303,17 @@ func (r *Restream) streamFallbackVideo() {
 	}
 }
 
-// streamLocalFallback streams a local .ts file in a loop
-func (r *Restream) streamLocalFallback(filePath string) {
-	logger.Debug("{restream/restream - streamLocalFallback} Channel %s: Starting local fallback from %s", r.Channel.Name, filePath)
+// streamLocalFallback loops the offline clip into the channel buffer. The clip
+// is held in memory by webui, so every channel shares the one copy.
+func (r *Restream) streamLocalFallback() {
+	logger.Debug("{restream/restream - streamLocalFallback} Channel %s: Starting local fallback", r.Channel.Name)
 
-	// Load fallback video into cache if not already loaded
-	fallbackVideoCacheMu.RLock()
-	needsLoad := fallbackVideoCachePath != filePath || len(fallbackVideoCache) == 0
-	fallbackVideoCacheMu.RUnlock()
+	videoData := webui.FallbackVideo()
+	if videoData == nil {
+		logger.Debug("{restream/restream - streamLocalFallback} Channel %s: Fallback clip unavailable", r.Channel.Name)
 
-	if needsLoad {
-		fallbackVideoCacheMu.Lock()
-		// Double-check after acquiring write lock
-		if fallbackVideoCachePath != filePath || len(fallbackVideoCache) == 0 {
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				fallbackVideoCacheMu.Unlock()
-				logger.Debug("{restream/restream - streamLocalFallback} Channel %s: Failed to load file: %v", r.Channel.Name, err)
-
-				return
-			}
-			fallbackVideoCache = data
-			fallbackVideoCachePath = filePath
-			logger.Debug("{restream/restream - streamLocalFallback} Cached fallback video: %d bytes", len(data))
-
-		}
-		fallbackVideoCacheMu.Unlock()
+		return
 	}
-
-	fallbackVideoCacheMu.RLock()
-	videoData := fallbackVideoCache
-	fallbackVideoCacheMu.RUnlock()
 
 	bufPtr := getStreamBuffer()
 	buf := *bufPtr

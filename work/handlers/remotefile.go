@@ -14,9 +14,9 @@ import (
 	"kptv-proxy/work/proxy"
 	"kptv-proxy/work/types"
 	"kptv-proxy/work/utils"
+	"kptv-proxy/work/webui"
 	"mime"
 	"net/http"
-	"os"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -292,20 +292,18 @@ func serveFallbackVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clip := webui.FallbackVideo()
+	if clip == nil {
+		logger.Error("{handlers/remotefile - serveFallbackVideo} fallback clip unavailable")
+		return
+	}
+
 	for {
 		if r.Context().Err() != nil {
 			return
 		}
 
-		f, err := os.Open(constants.Internal.FallbackVideoPath)
-		if err != nil {
-			logger.Error("{handlers/remotefile - serveFallbackVideo} open failed for %s: %v", constants.Internal.FallbackVideoPath, err)
-			return
-		}
-
-		_, copyErr := io.Copy(w, f)
-		f.Close()
-		if copyErr != nil {
+		if _, err := w.Write(clip); err != nil {
 			return
 		}
 

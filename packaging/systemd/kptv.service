@@ -1,0 +1,37 @@
+# KPTV Proxy — systemd unit for a bare-metal install.
+#
+# Assumes the binary lives at /srv/kptv/kptv and runs as the "kptv" system
+# user. See "Running as a systemd service" in readme.md for the install steps.
+
+[Unit]
+Description=KPTV Proxy
+Documentation=https://github.com/nbk1982/kptv-proxy
+# Playlists and EPGs are fetched during startup, so wait for real
+# connectivity rather than just for the network stack to be configured.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=kptv
+ExecStart=/srv/kptv/kptv
+WorkingDirectory=/srv/kptv
+SyslogIdentifier=kptv
+
+# systemd creates /var/lib/kptv owned by User= on every start; KPTV_DATA_DIR
+# points the database and the EPG disk cache there. Without it the binary
+# falls back to /settings, the Docker volume mount, which does not exist on a
+# bare host and which an unprivileged service user cannot create.
+StateDirectory=kptv
+Environment=KPTV_DATA_DIR=%S/kptv
+
+Restart=always
+# Back off between restarts; the default is fast enough to trip the start
+# limit and leave the unit dead before an operator sees the real error.
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@ import (
 	"kptv-proxy/work/middleware"
 	"kptv-proxy/work/proxy"
 	"kptv-proxy/work/users"
+	"kptv-proxy/work/webui"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -13,7 +14,7 @@ import (
 func SetupAdminRoutes(router *mux.Router, sp *proxy.StreamProxy) {
 
 	// Serve static admin assets — public so login/register pages can load CSS
-	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("/static/"))))
+	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", webui.Handler()))
 
 	// Admin UI entry point
 	router.HandleFunc("/", users.RequireAuth(handleAdminInterface)).Methods("GET")
@@ -87,7 +88,7 @@ func SetupAdminRoutes(router *mux.Router, sp *proxy.StreamProxy) {
 
 	// API reference docs
 	router.HandleFunc("/api-docs", users.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "/static/api-docs.html")
+		webui.ServeFile(w, r, "api-docs.html")
 	})).Methods("GET")
 
 	addLogEntry("info", "Admin interface initialized")
