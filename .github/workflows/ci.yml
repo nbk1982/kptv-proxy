@@ -3,8 +3,17 @@ name: CI
 on:
   pull_request:
     branches: ["main", "develop"]
-  # Called by build.yml so the image is only published after this passes.
+  # Called by build.yml and release.yml so nothing is published until this
+  # passes.
   workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version string to stamp into the binary. Release builds pass the git
+          tag; everything else falls back to a UTC timestamp.
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -59,7 +68,8 @@ jobs:
       # version triple as one baked into the image.
       - name: Build
         run: |
-          VERSION="v$(date -u +%Y%m%d%H.%M)"
+          VERSION="${{ inputs.version }}"
+          [ -n "$VERSION" ] || VERSION="v$(date -u +%Y%m%d%H.%M)"
           BUILDDATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           COMMIT="$(git rev-parse --short HEAD)"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
