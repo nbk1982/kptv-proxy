@@ -713,6 +713,8 @@ All `/api/*` endpoints require either a valid session cookie or a `Authorization
 
 > **Note**: HDHomeRun endpoints are restricted to RFC1918 (local network) addresses only. Requests from public IPs will receive a 403 Forbidden response. If behind a reverse proxy, set `X-Forwarded-For` appropriately.
 
+> **Addressing**: the lineup and stream URLs announced to HDHomeRun clients use the host and port the client connected with, not the configured base URL — exactly like a physical tuner. Add the proxy in Plex/Emby/Jellyfin by the address that is local to them (for example `127.0.0.1:8080` when they run on the same machine) and every follow-up request stays on that address.
+
 ## Configuration Reference
 
 ### Content Type Classification
@@ -931,6 +933,8 @@ docker-compose logs kptv-proxy | grep WATCHER
 - ✅ Ensure your media server is on the same local network as KPTV Proxy
 - ✅ HDHomeRun endpoints are restricted to RFC1918 addresses — public IPs are blocked
 - ✅ If behind a reverse proxy, ensure `X-Forwarded-For` is set to the client's real IP
+- ✅ Plex does not auto-discover the proxy (no SSDP). Use "Enter its network address manually" with `IP:PORT` — the port is the one the proxy listens on (`8080` by default), not the port of a reverse proxy in front of it
+- ✅ Plex only speaks plain HTTP to tuners — point it at the proxy port directly, not at an HTTPS reverse proxy
 
 **Problem**: A group-filtered playlist (`/pl/{username}/{password}/{group}`) returns no channels for an XC source after upgrading
 
@@ -950,6 +954,16 @@ Network → Open Network Stream → http://your-server:PORT/pl/USERNAME/PASSWORD
 Add-ons → PVR IPTV Simple Client
 M3U Play List URL: http://your-server:PORT/pl/USERNAME/PASSWORD
 ```
+
+### Plex / Emby / Jellyfin (HDHomeRun tuner)
+
+```
+Live TV & DVR → Set Up → "Enter its network address manually"
+Tuner address:  192.168.1.10:8080      (or 127.0.0.1:8080 when Plex runs on the same host)
+XMLTV guide:    http://192.168.1.10:8080/xmltv.php?username=USERNAME&password=PASSWORD
+```
+
+The media server must be on the local network (RFC1918) of the proxy. Stream URLs are handed out on the same address the tuner was added with, so no base URL change is needed.
 
 ### Tivimate / IPTV Smarters (Xtream Codes)
 

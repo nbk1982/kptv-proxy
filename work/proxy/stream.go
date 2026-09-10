@@ -211,12 +211,12 @@ func channelOriginalOrder(channel *types.Channel) (int, int) {
 // or return nothing keep their previous catalog instead of being dropped, and a run that
 // produces no channels at all never overwrites existing state.
 func (sp *StreamProxy) ImportStreams() {
-	logger.Debug("{proxy/stream - ImportStreams} Starting stream import for %d configured sources", len(sp.Config.Sources))
-
 	if len(sp.Config.Sources) == 0 {
 		logger.Warn("{proxy/stream - ImportStreams} No sources configured, skipping import")
 		return
 	}
+	logger.Info("{proxy/stream - ImportStreams} Importing %d source(s)", len(sp.Config.Sources))
+	importStarted := time.Now()
 
 	// possible recover
 	defer func() {
@@ -285,6 +285,13 @@ func (sp *StreamProxy) ImportStreams() {
 			srcCtx, srcCancel := context.WithTimeout(ctx, constants.Internal.ImportSourceTimeout)
 			defer srcCancel()
 
+			// a large catalog can take minutes to arrive; keep saying so, with
+			// the byte count, until this source is done
+			var downloaded atomic.Int64
+			srcCtx = parser.WithByteCounter(srcCtx, &downloaded)
+			logger.Info("{proxy/stream - ImportStreams} Source %s: import started", src.Name)
+			defer importHeartbeat(src.Name, started, &downloaded)()
+
 			streams := sp.FetchSourceStreams(srcCtx, src)
 
 			if srcCtx.Err() != nil {
@@ -302,16 +309,10 @@ func (sp *StreamProxy) ImportStreams() {
 			beforeFilter := len(streams)
 			var report *filter.Report
 			streams, report = filter.Apply(streams, src, sp.Config, sp.FilterManager, filter.Options{})
-			if beforeFilter != len(streams) {
-				logger.Debug("{proxy/stream - ImportStreams} Filtered %d streams down to %d for source: %s", beforeFilter, len(streams), src.Name)
-			}
 			sp.recordSourceImport(src, report, started, nil)
 
-			if src.Username != "" && src.Password != "" {
-				logger.Debug("{proxy/stream - ImportStreams} Parsed %d streams from Xtreme Codes API: %s", len(streams), utils.LogURL(sp.Config, src.URL))
-			} else {
-				logger.Debug("{proxy/stream - ImportStreams} Parsed %d streams from M3U8 source: %s", len(streams), utils.LogURL(sp.Config, src.URL))
-			}
+			logger.Info("{proxy/stream - ImportStreams} Source %s: %d streams fetched, %d kept after filters (%s)",
+				src.Name, beforeFilter, len(streams), time.Since(started).Round(time.Second))
 
 			for importOrder, stream := range streams {
 				stream.ImportOrder = importOrder
@@ -423,7 +424,32 @@ func (sp *StreamProxy) ImportStreams() {
 	// has its own now, so stop holding that memory
 	sp.releasePreviewCatalog()
 
-	logger.Debug("{proxy/stream - ImportStreams} Import committed %d channels (%d sources carried forward)", len(newChannels), len(failedSources))
+	logger.Info("{proxy/stream - ImportStreams} Import committed %d channels from %d of %d source(s) in %s (%d carried forward)",
+		len(newChannels), len(sp.Config.Sources)-len(failedSources), len(sp.Config.Sources),
+		time.Since(importStarted).Round(time.Second), len(failedSources))
+}
+
+// importHeartbeat logs at INFO, every ImportProgressInterval, that a source is
+// still being imported and how much of it has been downloaded so far. Without
+// it a provider catalog that takes minutes to arrive leaves the log silent
+// between the startup banner and the import summary. The returned func stops
+// the reporting; callers defer it.
+func importHeartbeat(name string, started time.Time, downloaded *atomic.Int64) func() {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(constants.Internal.ImportProgressInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				logger.Info("{proxy/stream - ImportStreams} Source %s: still importing, %s received so far (%s elapsed)",
+					name, utils.FormatBytes(downloaded.Load()), time.Since(started).Round(time.Second))
+			}
+		}
+	}()
+	return func() { close(stop) }
 }
 
 // carryForwardStreams collects the streams still held for sources that did not import

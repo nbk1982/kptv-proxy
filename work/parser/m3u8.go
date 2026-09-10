@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/grafov/m3u8"
 	"go.uber.org/ratelimit"
@@ -66,9 +68,9 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 
 	cacheKey := RawCacheKey(source)
 	if cached, found := cache.GetXCData(cacheKey); found {
-		logger.Debug("{parser/m3u8 - ParseM3U8} Using cached M3U8 data for %s", source.Name)
 		var streams []*types.Stream
 		if err := json.Unmarshal([]byte(cached), &streams); err == nil {
+			logger.Info("{parser/m3u8 - ParseM3U8} Source %s: using cached playlist (%d streams)", source.Name, len(streams))
 			return adoptSource(streams, source)
 		}
 	}
@@ -92,6 +94,9 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 	}
 	req = req.WithContext(ctx)
 
+	logger.Info("{parser/m3u8 - ParseM3U8} Source %s: downloading playlist from %s", source.Name, utils.LogURL(cfg, source.URL))
+	fetchStarted := time.Now()
+
 	resp, err := httpClient.DoWithHeaders(req, source.UserAgent, source.ReqOrigin, source.ReqReferrer)
 	if err != nil {
 		logger.Error("{parser/m3u8 - ParseM3U8} fetching M3U8 from %s: %v", utils.LogURL(cfg, source.URL), err)
@@ -110,19 +115,27 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 		return nil
 	}
 
+	if resp.ContentLength > 0 {
+		logger.Info("{parser/m3u8 - ParseM3U8} Source %s: playlist is %s, parsing as it downloads", source.Name, utils.FormatBytes(resp.ContentLength))
+	}
+
+	// count what arrives for the import heartbeat and for the summary below
+	var received atomic.Int64
+	body := &countingReader{r: countingBody(ctx, resp.Body), n: &received}
+
 	// hold the streams and the playlist
 	var streams []*types.Stream
 
 	// tee the body so a grafov failure re-parses what was already read plus the
 	// unconsumed remainder, rather than re-fetching the whole source
 	var consumed bytes.Buffer
-	playlist, listType, err := m3u8.DecodeFrom(bufio.NewReader(io.TeeReader(resp.Body, &consumed)), true)
+	playlist, listType, err := m3u8.DecodeFrom(bufio.NewReader(io.TeeReader(body, &consumed)), true)
 	if err == nil {
 		logger.Debug("{parser/m3u8 - ParseM3U8} Successfully parsed with grafov parser: %s", utils.LogURL(cfg, source.URL))
 		streams = ParseWithGrafov(playlist, listType, source, cfg)
 	} else {
 		logger.Debug("{parser/m3u8 - ParseM3U8} Grafov parser failed, using fallback parser: %v", err)
-		streams = ParseM3U8Fallback(io.MultiReader(bytes.NewReader(consumed.Bytes()), resp.Body), source, cfg)
+		streams = ParseM3U8Fallback(io.MultiReader(bytes.NewReader(consumed.Bytes()), body), source, cfg)
 	}
 
 	// a body cut short by the deadline parses into a partial catalog that is
@@ -133,6 +146,9 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 			utils.LogURL(cfg, source.URL), ctx.Err(), len(streams))
 		return nil
 	}
+
+	logger.Info("{parser/m3u8 - ParseM3U8} Source %s: downloaded %s and parsed %d streams in %s",
+		source.Name, utils.FormatBytes(received.Load()), len(streams), time.Since(fetchStarted).Round(time.Second))
 
 	// if there's actually streams
 	if len(streams) > 0 {

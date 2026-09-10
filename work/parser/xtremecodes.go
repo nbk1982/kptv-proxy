@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/ratelimit"
 )
@@ -352,15 +353,19 @@ func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingCl
 
 	cacheKey := RawCacheKey(source)
 	if cached, found := cache.GetXCData(cacheKey); found {
-		logger.Debug("{parser/xtremecodes - ParseXtremeCodesAPI} Using cached XC API data for %s", source.Name)
 		var streams []*types.Stream
 		if err := json.Unmarshal([]byte(cached), &streams); err == nil {
+			logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: using cached catalog (%d streams)", source.Name, len(streams))
 			return adoptSource(streams, source)
 		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, constants.Internal.ImportSourceTimeout)
 	defer cancel()
+
+	logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: fetching Xtream Codes catalog (categories, live, VOD, series) from %s",
+		source.Name, utils.LogURL(cfg, source.URL))
+	fetchStarted := time.Now()
 
 	var liveCategories, seriesCategories, vodCategories []XCCategory
 	var liveStreams []XCLiveStream
@@ -397,6 +402,10 @@ func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingCl
 	}()
 	fetchWG.Wait()
 
+	logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: fetched %d live streams, %d VOD, %d series (%d/%d/%d categories) in %s, building catalog",
+		source.Name, len(liveStreams), len(vodStreams), len(series), len(liveCategories), len(vodCategories), len(seriesCategories),
+		time.Since(fetchStarted).Round(time.Second))
+
 	liveCategoryMap := buildCategoryMap(liveCategories)
 	seriesCategoryMap := buildCategoryMap(seriesCategories)
 	vodCategoryMap := buildCategoryMap(vodCategories)
@@ -411,7 +420,8 @@ func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingCl
 		return processVODBatchWorker(batch, vodCategoryMap, source)
 	})...)
 
-	logger.Debug("{parser/xtremecodes - ParseXtremeCodesAPI} XC API parsing complete: %d total streams", len(allStreams))
+	logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: catalog built, %d streams in %s",
+		source.Name, len(allStreams), time.Since(fetchStarted).Round(time.Second))
 
 	// only cache a complete catalog, a partial fetch would otherwise be served until it expires
 	if ctx.Err() == nil && len(allStreams) > 0 && liveCategoryOK && seriesCategoryOK && vodCategoryOK && liveOK && seriesOK && vodOK {
@@ -586,7 +596,7 @@ func fetchXCDataWithContext[T any](ctx context.Context, httpClient *client.Heade
 		return nil, fmt.Errorf("XC API returned HTTP %d", resp.StatusCode)
 	}
 
-	decoder := json.NewDecoder(resp.Body)
+	decoder := json.NewDecoder(countingBody(ctx, resp.Body))
 	var data []T
 
 	// decode the response
