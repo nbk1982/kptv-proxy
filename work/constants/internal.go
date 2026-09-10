@@ -152,8 +152,9 @@ type InternalConstants struct {
 	// -------------------------------------------------------------------------
 	// work/proxy/stream.go — ImportStreams()
 	// -------------------------------------------------------------------------
-	ImportGlobalTimeout time.Duration // Hard ceiling for the full ImportStreams operation
-	ImportSourceTimeout time.Duration // Per-source ceiling; the primary bound on a slow source
+	ImportGlobalTimeout    time.Duration // Hard ceiling for the full ImportStreams operation
+	ImportSourceTimeout    time.Duration // Per-source ceiling; the primary bound on a slow source
+	ImportProgressInterval time.Duration // How often a still-running source import logs its progress
 
 	// -------------------------------------------------------------------------
 	// work/proxy/stream.go — New() / initializeRateLimiters()
@@ -443,6 +444,7 @@ var Internal = InternalConstants{
 	// -------------------------------------------------------------------------
 	ImportGlobalTimeout:            30 * time.Minute,
 	ImportSourceTimeout:            5 * time.Minute,
+	ImportProgressInterval:         30 * time.Second,
 	SourceDefaultRateLimit:         5,
 	MasterPlaylistSizeThreshold:    100 * 1024, // 100KB
 	ProxyCleanupTickerInterval:     10 * time.Second,
