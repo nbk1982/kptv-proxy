@@ -31,6 +31,7 @@ function escapeRegex(text) {
  * @param {string} containerId - Element the rows are rendered into
  * @param {Object} options
  * @param {Function} options.onChange - Called after any edit
+ * @param {Function} [options.onInput] - Called on every keystroke in a pattern, so a preview can follow the typing
  * @returns {Object} editor handle
  */
 function createRuleEditor(containerId, options = {}) {
@@ -216,6 +217,7 @@ function createRuleEditor(containerId, options = {}) {
         if (e.target.classList.contains('rule-pattern')) {
             rule.pattern = e.target.value;
             validateRegexInput(e.target);
+            if (options.onInput) options.onInput();
         } else if (e.target.classList.contains('rule-note')) {
             rule.note = e.target.value;
         }

@@ -6,7 +6,10 @@ let adminConfig = null;
 let allChannels = null;
 let allLogs = null;
 let currentPage = 1;
-let pageSize = 50;
+/** Rows per page every paginated list offers, and the size used until the operator picks one. */
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500, 1000];
+const DEFAULT_PAGE_SIZE = 1000;
+let pageSize = storedPageSize('kptv_page_size');
 let filteredChannels = null;
 let currentChannelName = null;
 let currentStreamData = null;
@@ -16,8 +19,22 @@ let allLocalSources = null;
 let metaEntries = [];
 let metaCurrent = null;
 let metaPage = 1;
-let metaPageSize = 50;
+let metaPageSize = storedPageSize('kptv_meta_page_size');
 let metaTotal = 0;
+
+/**
+ * Reads a remembered page size, falling back to the default when nothing
+ * valid is stored or storage is unavailable.
+ * @param {string} key - localStorage key
+ * @returns {number}
+ */
+function storedPageSize(key) {
+    try {
+        const stored = parseInt(localStorage.getItem(key), 10);
+        if (PAGE_SIZE_OPTIONS.includes(stored)) return stored;
+    } catch (e) { /* storage may be unavailable */ }
+    return DEFAULT_PAGE_SIZE;
+}
 
 /**
  * Performs an authenticated API call to the given endpoint,
@@ -399,6 +416,7 @@ function setupEventListeners() {
         const page = parseInt(e.target.value);
         if (!isNaN(page)) goToPage(page);
     });
+    document.getElementById('page-size-selector').addEventListener('change', (e) => setChannelPageSize(e.target.value));
 
     // XC account buttons
     document.getElementById('add-xc-account-btn').addEventListener('click', () => showXCAccountModal());

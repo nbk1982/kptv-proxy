@@ -64,6 +64,10 @@ function renderMetadata() {
     document.getElementById('meta-pagination').innerHTML = `
         <div class="text-gray-400">${metaTotal} entries</div>
         <div class="flex items-center gap-2">
+            <select class="bg-kptv-gray-light border border-kptv-border rounded px-2 py-1 text-gray-100 text-sm" title="Entries per page"
+                onchange="setMetaPageSize(this.value)">
+                ${PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n === metaPageSize ? 'selected' : ''}>${n} / page</option>`).join('')}
+            </select>
             <button class="px-3 py-1 bg-kptv-gray-light border border-kptv-border hover:bg-kptv-border rounded transition-colors"
                 onclick="goToMetaPage(${metaPage - 1})" ${metaPage <= 1 ? 'disabled' : ''}>Prev</button>
             <span class="text-gray-400">Page ${metaPage} of ${totalPages}</span>
@@ -81,6 +85,18 @@ function goToMetaPage(page) {
     const totalPages = Math.max(1, Math.ceil(metaTotal / metaPageSize));
     if (page < 1 || page > totalPages) return;
     metaPage = page;
+    loadMetadata();
+}
+
+/**
+ * Changes how many entries a page holds, remembers the choice for next time,
+ * and reloads from the first page.
+ * @param {string|number} size
+ */
+function setMetaPageSize(size) {
+    metaPageSize = Number(size) || DEFAULT_PAGE_SIZE;
+    try { localStorage.setItem('kptv_meta_page_size', String(metaPageSize)); } catch (e) { /* storage may be unavailable */ }
+    metaPage = 1;
     loadMetadata();
 }
 

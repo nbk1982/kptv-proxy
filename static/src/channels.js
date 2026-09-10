@@ -349,6 +349,9 @@ function updatePaginationInfo() {
     `Showing ${startIndex}-${endIndex} of ${totalChannels} channels`;
   document.getElementById("current-page").textContent = currentPage;
 
+  const sizeSelector = document.getElementById("page-size-selector");
+  if (sizeSelector) sizeSelector.value = String(pageSize);
+
   const pageSelector = document.getElementById("page-selector");
   if (pageSelector) {
     pageSelector.innerHTML = "";
@@ -389,6 +392,18 @@ function previousPage() {
     currentPage--;
     renderCurrentPage();
   }
+}
+
+/**
+ * Changes how many channels a page holds, remembers the choice for next time,
+ * and shows the first page at the new size.
+ * @param {string|number} size
+ */
+function setChannelPageSize(size) {
+  pageSize = Number(size) || DEFAULT_PAGE_SIZE;
+  try { localStorage.setItem("kptv_page_size", String(pageSize)); } catch (e) { /* storage may be unavailable */ }
+  currentPage = 1;
+  renderCurrentPage();
 }
 
 /** Navigates to the next page if not already on the last page. */

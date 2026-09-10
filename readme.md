@@ -754,6 +754,8 @@ Patterns are matched **case-insensitively** unless they open with their own flag
 
 The exclusion comes first on purpose: put the exceptions above the broad rules. A **Preview** in the admin UI reports, per rule, how many streams it decided and how many its pattern matched in total, which is how a rule that is shadowed by an earlier one or that matches nothing at all shows itself.
 
+Below the rules, the **Resulting streams** browser lists every stream of the catalog with the verdict it received and what settled it — `Kept · rule 2`, `Dropped · default`, `Dropped · group filter` — and re-evaluates as a pattern is typed, from the cached catalog, so the reach of a regular expression is visible stream by stream. Switch between kept, dropped and all, narrow by content type or by a text search over name and group, and page through 1000 streams at a time.
+
 **Filter profiles** are rule sets of their own, attached to any number of sources by name (`filterProfile`). A profile's rules are evaluated before the source's own, and its `default` applies unless the source sets one. Editing a profile changes every source using it; renaming one carries them along; deleting one leaves them with their own rules. Two providers with the same group naming — a reseller's two lines, say — are then filtered by a single list.
 
 Three further stages run after the rules, each of which can only narrow the result further. They predate the rules and are collapsed under *advanced* in the UI:
@@ -767,7 +769,7 @@ Saving a source starts an import right away and the source card shows progress a
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/sources/groups?url=` | Group inventory recorded by the source's last import |
-| `POST /api/sources/preview` | `{ "source": {...}, "profile": {...}, "force": false }` — evaluate a draft source, and optionally an unsaved profile, returning the filter report with per-rule counts |
+| `POST /api/sources/preview` | `{ "source": {...}, "profile": {...}, "force": false }` — evaluate a draft source, and optionally an unsaved profile, returning the filter report with per-rule counts. Add `"list": { "verdict": "kept\|dropped\|all", "q": "text", "type": "live\|vod\|series", "page": 1, "size": 1000 }` to also receive that page of per-stream verdicts (`name`, `group`, `type`, `kept`, `stage`, `rule`), at most 1000 per page |
 | `POST /api/import` | Re-import every source in the background; `409` while one runs. `{ "url": "…", "force": true }` discards that one source's cached catalog first, so it is re-downloaded while the others are re-filtered from cache |
 | `GET /api/import/status` | Running flag plus each source's last import outcome |
 | `GET /api/filter-profiles` | Every profile, with the sources attached to it |

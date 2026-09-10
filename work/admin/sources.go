@@ -144,6 +144,7 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 			Source  json.RawMessage       `json:"source"`
 			Profile *config.FilterProfile `json:"profile"`
 			Force   bool                  `json:"force"`
+			List    *previewListRequest   `json:"list"` // when set, a page of per-stream verdicts is returned too
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -183,7 +184,7 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 		defer cancel()
 
 		started := time.Now()
-		report, cached, err := sp.PreviewSource(ctx, &src, req.Profile, req.Force)
+		report, cached, err := sp.PreviewSource(ctx, &src, req.Profile, req.Force, req.List != nil)
 		if err != nil {
 			// the client navigated away or the wait for another preview to
 			// finish outlasted this request; there is nothing to report
@@ -199,11 +200,15 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
+		out := map[string]any{
 			"cached":     cached,
 			"durationMs": time.Since(started).Milliseconds(),
 			"report":     report,
-		})
+		}
+		if req.List != nil {
+			out["list"] = pagePreviewVerdicts(report.Verdicts, *req.List)
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

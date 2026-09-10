@@ -41,6 +41,29 @@ type RuleStat struct {
 	Decided int    `json:"decided"` // streams whose verdict came from this rule
 }
 
+// Stages of a pass that can settle a stream, as named in a Verdict.
+const (
+	StageRule    = "rule"    // an ordered rule matched
+	StageDefault = "default" // no rule matched; the owner's default applied
+	StageGroup   = "group"   // dropped by the group picker or group pattern
+	StageType    = "type"    // dropped by the content type gate
+	StagePattern = "pattern" // dropped by the type's include/exclude patterns
+)
+
+// Verdict is one stream's outcome in a pass: whether it survives and which
+// stage settled that. A kept stream names the stage that let it through the
+// rules (rule or default) since every later stage only narrows; a dropped
+// stream names the stage that removed it. The preview's result browser lists
+// these so an operator typing a pattern sees which streams it reaches.
+type Verdict struct {
+	Name  string            `json:"name"`
+	Group string            `json:"group"`
+	Type  types.ContentType `json:"type"`
+	Kept  bool              `json:"kept"`
+	Stage string            `json:"stage"`
+	Rule  int               `json:"rule"` // 1-based position in the effective rule list when Stage is rule, else 0
+}
+
 // Report is the outcome of one pass over a source's catalog.
 type Report struct {
 	Total          int                             `json:"total"`
@@ -51,6 +74,7 @@ type Report struct {
 	Rules          []RuleStat                      `json:"rules"`          // in evaluation order
 	DefaultAction  string                          `json:"defaultAction"`  // verdict applied when no rule matched
 	DefaultDecided int                             `json:"defaultDecided"` // streams settled by that verdict
+	Verdicts       []Verdict                       `json:"-"`              // every stream's outcome, only with Options.Verdicts; paged by the caller
 	groups         map[string]*GroupStat
 	matched        []int // per-rule match counts, indexed like Rules
 }
@@ -79,19 +103,20 @@ func (r *Report) startRules(filter *CompiledFilter, withStats bool) {
 }
 
 // observeRules applies the ordered rule list to one stream and records which
-// rule settled it, returning whether the rules keep it.
-func (r *Report) observeRules(filter *CompiledFilter, stream *types.Stream, group string, withStats bool) bool {
+// rule settled it, returning whether the rules keep it and the index of the
+// deciding rule, or -1 when the default did.
+func (r *Report) observeRules(filter *CompiledFilter, stream *types.Stream, group string, withStats bool) (bool, int) {
 	if len(filter.Rules) == 0 {
-		return filter.RuleDefault != config.FilterDefaultDrop
+		return filter.RuleDefault != config.FilterDefaultDrop, -1
 	}
 
 	keep, decidedBy, decided := ruleVerdict(filter.Rules, stream, group, withStats, r.matched)
 	if !decided {
 		r.DefaultDecided++
-		return filter.RuleDefault != config.FilterDefaultDrop
+		return filter.RuleDefault != config.FilterDefaultDrop, -1
 	}
 	r.Rules[decidedBy].Decided++
-	return keep
+	return keep, decidedBy
 }
 
 // newReport returns an empty report with every content type present, so a
