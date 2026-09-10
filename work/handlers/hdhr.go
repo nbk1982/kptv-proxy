@@ -10,6 +10,7 @@ import (
 	"kptv-proxy/work/users"
 	"kptv-proxy/work/utils"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -95,6 +96,26 @@ func HDHRDeviceID(baseURL string) string {
 	return fmt.Sprintf("%08X", h.Sum32())
 }
 
+// hdhrBaseURL returns the address a client must use for the follow-up HDHomeRun
+// requests (lineup, streams). A physical HDHomeRun reports the address it was
+// reached on, and we mirror that: the Host the client actually connected with,
+// with the scheme taken from TLS or X-Forwarded-Proto. This matters because the
+// HDHR endpoints are restricted to local-network clients — a Plex on the same
+// machine that adds the tuner as 127.0.0.1:8080 must get loopback URLs back.
+// Handing it the configured public base URL instead would make its next request
+// arrive from the server's public IP and be rejected by RequireLocalNetwork.
+// Falls back to the configured base URL when the request carries no Host.
+func hdhrBaseURL(r *http.Request, fallback string) string {
+	if r.Host == "" {
+		return strings.TrimRight(fallback, "/")
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 // hdhrGuideNumber derives a stable 1-9999 channel number from a channel name
 // using FNV32a. Because channel names are unique in the proxy channel map,
 // there can be no collisions. Numbers are consistent across restarts.
@@ -124,6 +145,7 @@ func handleHDHRDiscover(sp *proxy.StreamProxy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		base := hdhrBaseURL(r, sp.Config.BaseURL)
 		json.NewEncoder(w).Encode(hdhrDiscoverResponse{
 			FriendlyName:    hdhrDeviceName,
 			Manufacturer:    hdhrManufacturer,
@@ -131,10 +153,12 @@ func handleHDHRDiscover(sp *proxy.StreamProxy) http.HandlerFunc {
 			FirmwareName:    hdhrFirmwareName,
 			TunerCount:      hdhrTunerCount,
 			FirmwareVersion: hdhrFirmwareVersion,
-			DeviceID:        HDHRDeviceID(sp.Config.BaseURL),
-			DeviceAuth:      "kptv1234",
-			BaseURL:         sp.Config.BaseURL,
-			LineupURL:       sp.Config.BaseURL + "/lineup.json",
+			// DeviceID stays derived from the configured base URL so it is
+			// stable no matter which address a client discovers us on.
+			DeviceID:   HDHRDeviceID(sp.Config.BaseURL),
+			DeviceAuth: "kptv1234",
+			BaseURL:    base,
+			LineupURL:  base + "/lineup.json",
 		})
 
 		logger.Debug("{handlers/hdhr - handleHDHRDiscover} served discover.json to %s", r.RemoteAddr)
@@ -151,7 +175,7 @@ func handleHDHRDeviceXML(sp *proxy.StreamProxy) http.HandlerFunc {
 
 		doc := hdhrDeviceXML{
 			XMLNS:   "urn:schemas-upnp-org:device-1-0",
-			URLBase: sp.Config.BaseURL,
+			URLBase: hdhrBaseURL(r, sp.Config.BaseURL),
 			SpecVersion: hdhrSpecVersion{
 				Major: 1,
 				Minor: 0,
@@ -201,6 +225,7 @@ func handleHDHRLineup(sp *proxy.StreamProxy) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		lineup := make([]hdhrLineupEntry, 0, 1000)
+		base := hdhrBaseURL(r, sp.Config.BaseURL)
 
 		// getSortedChannels is defined in xcoutput.go (same package) and
 		// guarantees consistent alphabetical ordering across all output formats.
@@ -216,7 +241,7 @@ func handleHDHRLineup(sp *proxy.StreamProxy) http.HandlerFunc {
 			lineup = append(lineup, hdhrLineupEntry{
 				GuideNumber: hdhrGuideNumber(item.name),
 				GuideName:   item.name,
-				URL:         fmt.Sprintf("%s/hdhr/%s", sp.Config.BaseURL, utils.SanitizeChannelName(item.name)),
+				URL:         fmt.Sprintf("%s/hdhr/%s", base, utils.SanitizeChannelName(item.name)),
 				HD:          1,
 				Favorite:    0,
 			})
