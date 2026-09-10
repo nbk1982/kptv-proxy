@@ -165,26 +165,29 @@ func handleSetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 			incoming.TMDBAPIKey = sp.Config.TMDBAPIKey
 		}
 		for i := range incoming.Sources {
-			if incoming.Sources[i].Password != maskedSecret {
-				continue
-			}
-			incoming.Sources[i].Password = ""
-			for j := range sp.Config.Sources {
-				if sp.Config.Sources[j].Name == incoming.Sources[i].Name && sp.Config.Sources[j].URL == incoming.Sources[i].URL {
-					incoming.Sources[i].Password = sp.Config.Sources[j].Password
-					break
-				}
+			if incoming.Sources[i].Password == maskedSecret {
+				incoming.Sources[i].Password = storedPassword(sp, &incoming.Sources[i])
 			}
 		}
 
 		// Reject a filter the import could not honour, naming the field so the
-		// UI can point at it; the engine would otherwise silently disable it
+		// UI can point at it; the engine would otherwise silently disable it.
+		// A source whose filters are byte-identical to the stored ones is let
+		// through with a warning: patterns saved before this validation existed
+		// must not block saving unrelated settings.
 		for i := range incoming.Sources {
-			if err := incoming.Sources[i].NormalizeFilters(); err != nil {
-				addLogEntry("error", fmt.Sprintf("Rejected config: %v", err))
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+			src := &incoming.Sources[i]
+			err := src.NormalizeFilters()
+			if err == nil {
+				continue
 			}
+			if stored := findStoredSource(sp, src); stored != nil && config.FiltersEqual(src, stored) {
+				addLogEntry("warning", fmt.Sprintf("Keeping already-stored filter that the import cannot honour: %v", err))
+				continue
+			}
+			addLogEntry("error", fmt.Sprintf("Rejected config: %v", err))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		// Ensure FFmpeg slices are never nil in the persisted config.
@@ -213,6 +216,11 @@ func handleSetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 		// Reload from SQLite and swap the live config pointer so the saved
 		// settings apply immediately, not only after a graceful restart
 		sp.Config = config.LoadConfig()
+
+		// Rate limiters are built per source URL and cached, so a changed
+		// max connections value would otherwise keep the old rate until the
+		// process restarted — which saving a source no longer does
+		sp.ReinitRateLimiters()
 
 		addLogEntry("info", "Configuration updated via admin interface")
 

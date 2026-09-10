@@ -5,6 +5,8 @@ import (
 	"kptv-proxy/work/logger"
 	"kptv-proxy/work/types"
 	"kptv-proxy/work/utils"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -149,8 +151,11 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 	}
 	if len(source.GroupTypeOverrides) > 0 {
 		filter.GroupTypes = make(map[string]types.ContentType, len(source.GroupTypeOverrides))
-		for group, contentType := range source.GroupTypeOverrides {
-			filter.GroupTypes[config.GroupKey(group)] = types.ContentType(contentType)
+		// sorted so two spellings of one label always resolve the same way;
+		// NormalizeFilters rejects conflicting pairs, but a config written
+		// before it existed can still carry them
+		for _, group := range slices.Sorted(maps.Keys(source.GroupTypeOverrides)) {
+			filter.GroupTypes[config.GroupKey(group)] = types.ContentType(source.GroupTypeOverrides[group])
 		}
 	}
 

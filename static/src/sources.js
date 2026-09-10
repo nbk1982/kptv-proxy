@@ -10,7 +10,13 @@ async function loadSources() {
             apiCall('/api/import/status', { quiet: true }).catch(() => null),
         ]);
         renderSources(config.sources || [], status);
-        if (status) renderImportStatus(status);
+        if (status) {
+            renderImportStatus(status);
+            // an import started elsewhere — the scheduled refresh, a restart,
+            // another tab — still has to be followed to completion here, or
+            // the cards stay stuck on "Importing…"
+            if (status.running) pollImportStatus();
+        }
     } catch (error) {
         document.getElementById('sources-container').innerHTML =
             '<div class="bg-orange-900/20 border border-orange-600 text-orange-100 px-4 py-3 rounded">Failed to load sources</div>';
@@ -96,7 +102,7 @@ function renderSources(sources, status) {
                     <span>Edit</span>
                 </button>
                 <button class="px-3 py-1 bg-green-700 hover:bg-green-600 rounded text-sm transition-colors flex items-center space-x-1"
-                    onclick="importSource(${index})" title="Re-download this source and apply its filters">
+                    onclick="importSource(${index})" title="Re-download this source and re-import with its filters">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
@@ -169,7 +175,7 @@ function renderImportStatusLine(st) {
 
 let importStatusTimer = null;
 let importWasRunning = false;
-let importRetrigger = false;
+let importRetrigger = null;
 
 /**
  * Polls the import status while an import runs, updating the source cards,
@@ -191,6 +197,7 @@ async function pollImportStatus() {
         importStatusTimer = setTimeout(pollImportStatus, 2000);
         return;
     }
+    importStatusTimer = null;
     if (importWasRunning) {
         importWasRunning = false;
         showNotification('Import finished', 'success');
@@ -199,8 +206,9 @@ async function pollImportStatus() {
         loadAllChannels();
     }
     if (importRetrigger) {
-        importRetrigger = false;
-        triggerImport();
+        const retry = importRetrigger;
+        importRetrigger = null;
+        triggerImport(retry.url, retry.force);
     }
 }
 
@@ -238,7 +246,7 @@ async function triggerImport(url = '', force = false) {
         showNotification(url ? 'Import started for this source' : 'Import started', 'primary');
     } catch (error) {
         if (/HTTP 409/.test(error.message)) {
-            importRetrigger = true;
+            importRetrigger = { url, force };
             showNotification('An import is already running; the new settings apply when it finishes', 'warning');
         } else {
             showNotification('Failed to start import: ' + error.message, 'danger');
@@ -417,6 +425,7 @@ async function saveSource() {
         await apiCall('/api/config', { method: 'POST', body: JSON.stringify(config), quiet: true });
 
         hideModal('source-modal');
+        closeFilterPanel();
         showNotification('Source saved', 'success');
         loadGlobalSettings();
         loadSources();

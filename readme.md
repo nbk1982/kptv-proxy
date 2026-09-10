@@ -741,7 +741,7 @@ Saving a source starts an import right away and the source card shows progress a
 |----------|---------|
 | `GET /api/sources/groups?url=` | Group inventory recorded by the source's last import |
 | `POST /api/sources/preview` | `{ "source": {...}, "force": false }` — evaluate a draft source, returns the filter report |
-| `POST /api/import` | `{ "url": "", "force": false }` — import in the background; `force` re-downloads instead of using the raw cache; 409 while one runs |
+| `POST /api/import` | Re-import every source in the background; `409` while one runs. `{ "url": "…", "force": true }` discards that one source's cached catalog first, so it is re-downloaded while the others are re-filtered from cache |
 | `GET /api/import/status` | Running flag plus each source's last import outcome |
 
 ### Global Settings

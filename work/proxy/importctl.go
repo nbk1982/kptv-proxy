@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"kptv-proxy/work/config"
@@ -50,19 +49,44 @@ type ImportStatus struct {
 // catalog with hundreds of thousands of entries is too large for the shared
 // otter cache, which is why the import path re-fetches and this one must not.
 type previewSlot struct {
-	mu        sync.Mutex
+	// sem serializes previews with a capacity of one, so a caller can wait for
+	// its turn under its own request context instead of blocking on a mutex
+	// that cannot be cancelled while another preview downloads a catalog.
+	sem       chan struct{}
 	key       string
 	fetchedAt time.Time
 	streams   []*types.Stream
 	stamps    []types.ContentType // each stream's type as the parser stamped it
 }
 
+// acquire takes the preview slot, or gives up when the caller's context ends.
+func (s *previewSlot) acquire(ctx context.Context) error {
+	select {
+	case s.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// release hands the slot to the next caller.
+func (s *previewSlot) release() {
+	<-s.sem
+}
+
 // take returns the cached catalog for key while it is fresh, with every stream
 // restored to its parser stamp. Apply overwrites ContentType, and the shared
 // resolver treats an existing stamp as authoritative, so a verdict from the
-// previous preview would otherwise leak into the next one. Callers hold mu.
+// previous preview would otherwise leak into the next one. A catalog that is
+// stale or for another source is released here rather than held until the next
+// preview replaces it, since it can be hundreds of megabytes. Callers hold the
+// slot.
 func (s *previewSlot) take(key string) ([]*types.Stream, bool) {
-	if s.key != key || s.streams == nil || time.Since(s.fetchedAt) > constants.Internal.PreviewCacheTTL {
+	if s.key != key || time.Since(s.fetchedAt) > constants.Internal.PreviewCacheTTL {
+		s.streams, s.stamps = nil, nil
+		return nil, false
+	}
+	if s.streams == nil {
 		return nil, false
 	}
 	for i, stream := range s.streams {
@@ -80,10 +104,23 @@ func (s *previewSlot) put(key string, streams []*types.Stream) {
 	s.key, s.fetchedAt, s.streams, s.stamps = key, time.Now(), streams, stamps
 }
 
-// drop forgets the slot's catalog when it belongs to key. Callers hold mu.
+// drop forgets the slot's catalog when it belongs to key. Callers hold the slot.
 func (s *previewSlot) drop(key string) {
 	if s.key == key {
 		s.streams, s.stamps = nil, nil
+	}
+}
+
+// releasePreviewCatalog frees the previewed catalog. Called once an import has
+// committed, so the memory a preview held does not outlive the editing session
+// that needed it.
+func (sp *StreamProxy) releasePreviewCatalog() {
+	select {
+	case sp.preview.sem <- struct{}{}:
+		sp.preview.streams, sp.preview.stamps = nil, nil
+		<-sp.preview.sem
+	default:
+		// a preview is running; it will replace or release the catalog itself
 	}
 }
 
@@ -106,7 +143,10 @@ func (sp *StreamProxy) FetchSourceStreams(ctx context.Context, src *config.Sourc
 // memory. With force, the named source (or every source when sourceURL is
 // empty) is dropped from the raw cache first and downloaded afresh.
 func (sp *StreamProxy) TriggerImport(sourceURL string, force bool) error {
-	if sp.importRunning.Load() {
+	// the gate is claimed before the goroutine starts, so two clicks in the
+	// same instant cannot both queue a full import, and a status poll issued
+	// right after this returns already reports the run
+	if !sp.importPending.CompareAndSwap(false, true) {
 		return ErrImportRunning
 	}
 	if force {
@@ -117,7 +157,10 @@ func (sp *StreamProxy) TriggerImport(sourceURL string, force bool) error {
 			}
 		}
 	}
-	go sp.ImportStreams()
+	go func() {
+		defer sp.importPending.Store(false)
+		sp.ImportStreams()
+	}()
 	return nil
 }
 
@@ -125,10 +168,13 @@ func (sp *StreamProxy) TriggerImport(sourceURL string, force bool) error {
 // source, whether it is being fetched and how its last import went.
 func (sp *StreamProxy) ImportStatus() ImportStatus {
 	status := ImportStatus{
-		Running: sp.importRunning.Load(),
+		// pending covers the window between TriggerImport returning and the
+		// import goroutine actually starting, plus a manual run waiting behind
+		// the scheduled one
+		Running: sp.importRunning.Load() || sp.importPending.Load(),
 		Sources: make([]SourceImportStatus, 0, len(sp.Config.Sources)),
 	}
-	if status.Running {
+	if sp.importRunning.Load() {
 		startedAt := time.Unix(0, sp.importStartedAt.Load())
 		status.StartedAt = &startedAt
 	}
@@ -164,8 +210,10 @@ func (sp *StreamProxy) ImportStatus() ImportStatus {
 func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConfig, force bool) (report *filter.Report, cached bool, err error) {
 	// previews are serialized end to end: the slot's streams are shared and
 	// Apply rewrites their type stamps, so two passes must never interleave
-	sp.preview.mu.Lock()
-	defer sp.preview.mu.Unlock()
+	if err := sp.preview.acquire(ctx); err != nil {
+		return nil, false, err
+	}
+	defer sp.preview.release()
 
 	key := parser.RawCacheKey(src)
 	if force {
@@ -193,9 +241,12 @@ func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConf
 // recordSourceImport persists the outcome of one source's import: the summary
 // row the status endpoint reads and, on success, the group inventory the
 // filter UI offers for selection. A failed fetch keeps the previous inventory,
-// since the catalog it described is the one still being served. Persistence
-// errors are logged and never fatal; the catalog is already committed in
-// memory by the time this runs.
+// since the catalog it described is the one still being served.
+//
+// It runs per source, as soon as that source has been filtered, so the record
+// describes what the source contributed rather than what the run as a whole
+// committed: a later run that produces no channels at all is abandoned and
+// leaves these rows in place. Persistence errors are logged and never fatal.
 func (sp *StreamProxy) recordSourceImport(src *config.SourceConfig, report *filter.Report, started time.Time, importErr error) {
 	rec := db.SourceImport{
 		SourceURL:  src.URL,

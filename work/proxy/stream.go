@@ -70,9 +70,10 @@ type StreamProxy struct {
 	FilterManager         *filter.FilterManager                // handles stream filtering rules from configuration
 	importGeneration      atomic.Uint64                        // bumped on each committed import so cached playlists are not reused across imports
 	groupIndex            atomic.Pointer[map[string]struct{}]  // lowercased set of known group titles, rebuilt on each committed import
-	nameIndex             atomic.Pointer[map[string]string]   // sanitized channel name -> real channel name, rebuilt on each committed import
+	nameIndex             atomic.Pointer[map[string]string]    // sanitized channel name -> real channel name, rebuilt on each committed import
 	importMu              sync.Mutex                           // serializes catalog imports so a manual run never interleaves with the scheduled one
 	importRunning         atomic.Bool                          // true while ImportStreams holds importMu, read by the admin status endpoint
+	importPending         atomic.Bool                          // claimed by TriggerImport before its goroutine starts, so the 409 gate is race-free
 	importStartedAt       atomic.Int64                         // unix nanoseconds at which the running import began
 	importingSources      *xsync.MapOf[string, time.Time]      // source URL -> fetch start, for per-source progress in the admin UI
 	preview               previewSlot                          // raw catalog of the last previewed source, for quick re-evaluation
@@ -100,6 +101,7 @@ func New(cfg *config.Config, bufferPool *buffer.BufferPool, httpClient *client.H
 		rateLimiterMutex:      sync.RWMutex{},
 		FilterManager:         filter.NewFilterManager(),
 		importingSources:      xsync.NewMapOf[string, time.Time](),
+		preview:               previewSlot{sem: make(chan struct{}, 1)},
 	}
 
 	// initialize all rate limiters upfront to avoid lazy creation during imports
@@ -416,6 +418,10 @@ func (sp *StreamProxy) ImportStreams() {
 	sp.importGeneration.Add(1)
 	sp.rebuildGroupIndex()
 	sp.rebuildNameIndex()
+
+	// the previewed catalog was a copy of one source's raw entries; the import
+	// has its own now, so stop holding that memory
+	sp.releasePreviewCatalog()
 
 	logger.Debug("{proxy/stream - ImportStreams} Import committed %d channels (%d sources carried forward)", len(newChannels), len(failedSources))
 }

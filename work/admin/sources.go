@@ -30,6 +30,27 @@ func findSource(sp *proxy.StreamProxy, url string) *config.SourceConfig {
 	return nil
 }
 
+// findStoredSource returns the configured source a payload refers to: the one
+// with the same name and URL, falling back to the URL alone so renaming a
+// source in the modal does not detach it from what is stored.
+func findStoredSource(sp *proxy.StreamProxy, src *config.SourceConfig) *config.SourceConfig {
+	for i := range sp.Config.Sources {
+		if sp.Config.Sources[i].Name == src.Name && sp.Config.Sources[i].URL == src.URL {
+			return &sp.Config.Sources[i]
+		}
+	}
+	return findSource(sp, src.URL)
+}
+
+// storedPassword returns the credential held for a source, for a payload that
+// posted the mask back instead of a new value.
+func storedPassword(sp *proxy.StreamProxy, src *config.SourceConfig) string {
+	if stored := findStoredSource(sp, src); stored != nil {
+		return stored.Password
+	}
+	return ""
+}
+
 // writeJSON encodes v as the response body with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -132,10 +153,7 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 
 		// the UI never sees the stored password; the mask means "use what is saved"
 		if src.Password == maskedSecret {
-			src.Password = ""
-			if stored := findSource(sp, src.URL); stored != nil {
-				src.Password = stored.Password
-			}
+			src.Password = storedPassword(sp, &src)
 		}
 
 		if err := src.NormalizeFilters(); err != nil {
@@ -149,8 +167,17 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 		started := time.Now()
 		report, cached, err := sp.PreviewSource(ctx, &src, req.Force)
 		if err != nil {
+			// the client navigated away or the wait for another preview to
+			// finish outlasted this request; there is nothing to report
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			addLogEntry("warning", fmt.Sprintf("Source preview failed for %s: %v", src.Name, err))
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			status := http.StatusBadGateway
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 

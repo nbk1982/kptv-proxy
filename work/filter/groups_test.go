@@ -191,3 +191,78 @@ func TestGroupRulesInvalidateCachedFilter(t *testing.T) {
 		t.Fatal("a changed type gate must recompile the filter")
 	}
 }
+
+func TestConflictingOverrideSpellingsResolveDeterministically(t *testing.T) {
+	// NormalizeFilters rejects this pair, but a config written before that
+	// validation existed can still carry it; the engine must not pick at random
+	src := &config.SourceConfig{
+		URL:                "http://p/list.m3u",
+		GroupTypeOverrides: map[string]string{"♦️  SBT": "vod", "♦️ sbt": "series", "♦️   SBT  ": "live"},
+	}
+	first := ""
+	for i := 0; i < 20; i++ {
+		out := run(t, src, stream("SBT SP FHD", "http://p/play/b/ts", "♦️  SBT", types.ContentTypeLive))
+		if len(out) != 1 {
+			t.Fatalf("stream should be kept, got %d", len(out))
+		}
+		if i == 0 {
+			first = string(out[0].ContentType)
+			continue
+		}
+		if string(out[0].ContentType) != first {
+			t.Fatalf("override resolved to %q then %q", first, out[0].ContentType)
+		}
+	}
+}
+
+func TestReportOrdersGroupsBySizeAndBreaksTypeTiesToLive(t *testing.T) {
+	streams := []*types.Stream{
+		stream("Small", "http://p/play/a/ts", "Tiny", types.ContentTypeLive),
+		stream("Big 1", "http://p/play/b", "Huge", types.ContentTypeVOD),
+		stream("Big 2", "http://p/play/c", "Huge", types.ContentTypeVOD),
+		// one live and one series entry in the same group: the tie goes to live
+		stream("Tied live", "http://p/play/d/ts", "Tied", types.ContentTypeLive),
+		stream("Tied series", "http://p/play/e", "Tied", types.ContentTypeSeries),
+	}
+	_, report := Apply(streams, &config.SourceConfig{}, NewFilterManager())
+
+	if len(report.Groups) != 3 {
+		t.Fatalf("want 3 groups, got %d", len(report.Groups))
+	}
+	if report.Groups[0].Name != "Huge" || report.Groups[0].Total != 2 {
+		t.Fatalf("largest group must come first, got %q (%d)", report.Groups[0].Name, report.Groups[0].Total)
+	}
+	if report.Groups[1].Name != "Tied" || report.Groups[2].Name != "Tiny" {
+		t.Fatalf("equal-sized groups must be ordered by name, got %q then %q", report.Groups[1].Name, report.Groups[2].Name)
+	}
+	if report.Groups[1].ContentType != types.ContentTypeLive {
+		t.Fatalf("a type tie must resolve to live, got %q", report.Groups[1].ContentType)
+	}
+	if report.Groups[0].ContentType != types.ContentTypeVOD {
+		t.Fatalf("the dominant type must win, got %q", report.Groups[0].ContentType)
+	}
+}
+
+func TestOverrideAppliesWithoutATypeGate(t *testing.T) {
+	// no ImportTypes gate: the override still has to change the stamp, since
+	// downstream output serves the stream as the type it was filtered as
+	src := &config.SourceConfig{GroupTypeOverrides: map[string]string{"♦️ CANAIS 24H | SERIES ⭐": "live"}}
+	out := run(t, src, catalog()...)
+	if len(out) != 6 {
+		t.Fatalf("nothing should be dropped, got %d", len(out))
+	}
+	for _, s := range out {
+		if s.Name == "[24H] Big Mouth 05" && s.ContentType != types.ContentTypeLive {
+			t.Fatalf("override should force live, got %q", s.ContentType)
+		}
+	}
+}
+
+func TestExcludeModeCombinesListAndRegex(t *testing.T) {
+	src := &config.SourceConfig{
+		GroupFilterMode:  config.GroupFilterExclude,
+		GroupFilterList:  []string{"♦️ Novelas"},
+		GroupFilterRegex: "^♦️ canais 24h",
+	}
+	assertNames(t, run(t, src, catalog()...), "GLOBO SP FHD", "SBT SP FHD", "Duna", "Orphan Feed")
+}

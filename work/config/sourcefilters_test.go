@@ -38,7 +38,9 @@ func TestNormalizeFiltersTidiesInput(t *testing.T) {
 	if err := src.NormalizeFilters(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(src.GroupFilterList) != 2 || src.GroupFilterList[0] != "♦️  GLOBO" || src.GroupFilterList[1] != "♦️  SBT" {
+	// the empty label is a selection of its own, so it survives beside the rest
+	if len(src.GroupFilterList) != 3 || src.GroupFilterList[0] != "♦️  GLOBO" ||
+		src.GroupFilterList[1] != "" || src.GroupFilterList[2] != "♦️  SBT" {
 		t.Fatalf("list should be trimmed and deduped by GroupKey, got %q", src.GroupFilterList)
 	}
 	if src.GroupFilterRegex != "^x" {
@@ -106,5 +108,81 @@ func TestParseSourceJSONReadsFilterFields(t *testing.T) {
 func TestGroupKeyCollapsesCaseAndWhitespace(t *testing.T) {
 	if GroupKey("  ♦️   GLOBO ") != "♦️ globo" || GroupKey("A\tB") != "a b" || GroupKey("") != "" {
 		t.Fatal("GroupKey must lowercase, trim and collapse whitespace")
+	}
+}
+
+func TestNormalizeFiltersKeepsTheNoGroupSelection(t *testing.T) {
+	// "(no group)" is a real row in the picker: it is how streams that carry
+	// no group-title are named, and the engine keys it like any other label
+	src := SourceConfig{Name: "p", GroupFilterMode: GroupFilterInclude, GroupFilterList: []string{"", "♦️  SBT", "  "}}
+	if err := src.NormalizeFilters(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(src.GroupFilterList) != 2 || src.GroupFilterList[0] != "" || src.GroupFilterList[1] != "♦️  SBT" {
+		t.Fatalf("empty label must survive and collapse with whitespace-only, got %q", src.GroupFilterList)
+	}
+
+	only := SourceConfig{Name: "p", GroupFilterMode: GroupFilterInclude, GroupFilterList: []string{""}}
+	if err := only.NormalizeFilters(); err != nil {
+		t.Fatalf("a list holding only the empty label is a valid selection: %v", err)
+	}
+}
+
+func TestNormalizeFiltersRejectsConflictingOverrideSpellings(t *testing.T) {
+	// both spellings name one group; forcing two types would resolve at random
+	conflict := SourceConfig{Name: "p", GroupTypeOverrides: map[string]string{"♦️  GLOBO": "live", "♦️ globo": "vod"}}
+	err := conflict.NormalizeFilters()
+	if err == nil || !strings.Contains(err.Error(), "same group twice") {
+		t.Fatalf("want a conflict error, got %v", err)
+	}
+
+	// the same type twice is not a conflict, it collapses to one entry
+	agree := SourceConfig{Name: "p", GroupTypeOverrides: map[string]string{"♦️  GLOBO": "live", "♦️ globo": "live"}}
+	if err := agree.NormalizeFilters(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(agree.GroupTypeOverrides) != 1 {
+		t.Fatalf("equal spellings should collapse, got %q", agree.GroupTypeOverrides)
+	}
+}
+
+func TestFiltersEqualComparesEveryRule(t *testing.T) {
+	base := func() SourceConfig {
+		return SourceConfig{
+			GroupFilterMode:    GroupFilterInclude,
+			GroupFilterList:    []string{"a", "b"},
+			GroupFilterRegex:   "^x",
+			ImportTypes:        []string{"live"},
+			GroupTypeOverrides: map[string]string{"g": "live"},
+			LiveIncludeRegex:   "fhd$",
+		}
+	}
+	a, b := base(), base()
+	if !FiltersEqual(&a, &b) {
+		t.Fatal("identical filters must compare equal")
+	}
+	// a difference in any one rule has to be noticed
+	mutations := []func(*SourceConfig){
+		func(s *SourceConfig) { s.GroupFilterMode = GroupFilterExclude },
+		func(s *SourceConfig) { s.GroupFilterList = []string{"a"} },
+		func(s *SourceConfig) { s.GroupFilterList = []string{"b", "a"} },
+		func(s *SourceConfig) { s.GroupFilterRegex = "^y" },
+		func(s *SourceConfig) { s.ImportTypes = nil },
+		func(s *SourceConfig) { s.GroupTypeOverrides = map[string]string{"g": "vod"} },
+		func(s *SourceConfig) { s.LiveIncludeRegex = "" },
+		func(s *SourceConfig) { s.VODExcludeRegex = "adult" },
+	}
+	for i, mutate := range mutations {
+		changed := base()
+		mutate(&changed)
+		if FiltersEqual(&a, &changed) {
+			t.Fatalf("mutation %d should not compare equal", i)
+		}
+	}
+	// fields outside the filters are irrelevant
+	renamed := base()
+	renamed.Name, renamed.MaxConnections = "other", 99
+	if !FiltersEqual(&a, &renamed) {
+		t.Fatal("non-filter fields must not affect the comparison")
 	}
 }

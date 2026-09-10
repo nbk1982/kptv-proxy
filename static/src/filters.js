@@ -48,6 +48,7 @@ function newFilterPanelState() {
         report: null,            // last preview response
         inventoryAt: null,       // when the inventory shown was recorded
         loading: false,
+        pending: false,          // a rule changed while a preview was in flight
     };
 }
 
@@ -85,7 +86,8 @@ function initFilterPanel() {
 
     document.getElementById('filter-group-search').addEventListener('input', (e) => {
         if (!filterPanel) return;
-        filterPanel.search = e.target.value.trim().toLowerCase();
+        // not trimmed: a trailing space is part of a prefix search
+        filterPanel.search = e.target.value.toLowerCase();
         renderFilterGroups();
     });
 
@@ -269,11 +271,27 @@ function scheduleFilterPreview() {
 }
 
 /**
+ * Tears the panel down when the source modal closes, so a pending debounce
+ * cannot fetch for a modal that is gone.
+ */
+function closeFilterPanel() {
+    clearTimeout(filterPreviewTimer);
+    filterPreviewTimer = null;
+    filterPanel = null;
+}
+
+/**
  * Evaluates the draft rules against the provider's catalog.
  * @param {boolean} force - re-download the catalog instead of using the cache
  */
 async function runFilterPreview(force) {
-    if (!filterPanel || filterPanel.loading) return;
+    if (!filterPanel) return;
+    if (filterPanel.loading) {
+        // re-evaluate once the running preview lands, otherwise the result
+        // shown would describe rules the controls no longer say
+        filterPanel.pending = true;
+        return;
+    }
     const draft = readSourceForm();
     if (!draft.url) {
         showNotification('Enter the source URL first', 'warning');
@@ -286,6 +304,7 @@ async function runFilterPreview(force) {
 
     const panel = filterPanel;
     panel.loading = true;
+    panel.pending = false;
     renderFilterSummary();
     try {
         const result = await apiCall('/api/sources/preview', {
@@ -303,6 +322,10 @@ async function runFilterPreview(force) {
         if (panel === filterPanel) {
             panel.loading = false;
             renderFilterPanel();
+            if (panel.pending) {
+                panel.pending = false;
+                runFilterPreview(false);
+            }
         }
     }
 }
@@ -312,10 +335,18 @@ async function runFilterPreview(force) {
  * @returns {Array<Object>}
  */
 function visibleFilterGroups() {
-    return filterPanel.groups.filter(g =>
-        (!filterPanel.typeChip || g.type === filterPanel.typeChip) &&
-        (!filterPanel.search || g.name.toLowerCase().includes(filterPanel.search) ||
-            g.samples.some(s => s.toLowerCase().includes(filterPanel.search))));
+    // the chip compares against the type the row displays, override included.
+    // the search matches the label literally, spacing and all: providers mark
+    // whole families of groups by their prefix (a double space, an emoji), and
+    // pairing such a search with "select visible" is the fast way to pick them.
+    const search = filterPanel.search;
+    return filterPanel.groups.filter(g => {
+        const type = filterPanel.overrides.get(g.key) || g.type;
+        if (filterPanel.typeChip && type !== filterPanel.typeChip) return false;
+        if (!search) return true;
+        return g.name.toLowerCase().includes(search) ||
+            g.samples.some(s => s.toLowerCase().includes(search));
+    });
 }
 
 /** Re-renders every part of the panel from state. */

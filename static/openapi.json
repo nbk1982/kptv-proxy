@@ -165,7 +165,7 @@
       "ImportRequest": {
         "type": "object",
         "properties": {
-          "url":   { "type": "string", "description": "Source to re-download; empty for every source" },
+          "url":   { "type": "string", "description": "With force, the source whose cached catalog is discarded before importing; empty means every source" },
           "force": { "type": "boolean", "description": "Drop the raw cache first" }
         }
       },
@@ -485,7 +485,7 @@
     "/api/import": {
       "post": {
         "summary": "Import every source now, in the background",
-        "description": "Applies saved filters without a restart. Sources whose raw catalog is still cached are not downloaded again unless force is set.",
+        "description": "Applies saved filters without a restart. Every configured source is re-imported; sources whose raw catalog is still cached are re-filtered rather than downloaded again. url plus force discards that one source's cached catalog first so it is fetched afresh.",
         "operationId": "triggerImport",
         "tags": ["Configuration"],
         "security": [{"bearerAuth": []},{"cookieAuth": []}],

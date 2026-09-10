@@ -4,6 +4,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -195,20 +197,30 @@ func (s *SourceConfig) NormalizeFilters() error {
 	}
 	s.ImportTypes = types
 
+	// two spellings of one label would otherwise force a type at random,
+	// since the engine keys overrides by GroupKey and map order is undefined
 	var overrides map[string]string
-	for group, t := range s.GroupTypeOverrides {
-		group = strings.TrimSpace(group)
-		t = strings.ToLower(strings.TrimSpace(t))
-		if group == "" || t == "" {
+	seenGroups := make(map[string]string, len(s.GroupTypeOverrides))
+	for _, group := range slices.Sorted(maps.Keys(s.GroupTypeOverrides)) {
+		t := strings.ToLower(strings.TrimSpace(s.GroupTypeOverrides[group]))
+		trimmed := strings.TrimSpace(group)
+		if trimmed == "" || t == "" {
 			continue
 		}
 		if !isContentTypeName(t) {
 			return fmt.Errorf("source %q: groupTypeOverrides[%q] value %q is not one of live, vod, series", s.Name, group, t)
 		}
+		if kept, exists := seenGroups[GroupKey(trimmed)]; exists {
+			if overrides[kept] != t {
+				return fmt.Errorf("source %q: groupTypeOverrides names the same group twice with different types (%q and %q)", s.Name, kept, trimmed)
+			}
+			continue
+		}
 		if overrides == nil {
 			overrides = make(map[string]string)
 		}
-		overrides[group] = t
+		seenGroups[GroupKey(trimmed)] = trimmed
+		overrides[trimmed] = t
 	}
 	s.GroupTypeOverrides = overrides
 
@@ -234,8 +246,10 @@ func (s *SourceConfig) NormalizeFilters() error {
 	return nil
 }
 
-// dedupeGroups trims the labels, drops empty ones and collapses entries that
-// GroupKey considers equal, keeping the first spelling the operator used.
+// dedupeGroups trims the labels and collapses entries that GroupKey considers
+// equal, keeping the first spelling the operator used. The empty label is a
+// real selection — it is how streams that carry no group are named, and the UI
+// offers it as "(no group)" — so it is kept rather than dropped.
 func dedupeGroups(groups []string) []string {
 	if len(groups) == 0 {
 		return nil
@@ -245,7 +259,7 @@ func dedupeGroups(groups []string) []string {
 	for _, g := range groups {
 		g = strings.TrimSpace(g)
 		key := GroupKey(g)
-		if g == "" || seen[key] {
+		if seen[key] {
 			continue
 		}
 		seen[key] = true
@@ -255,6 +269,24 @@ func dedupeGroups(groups []string) []string {
 		return nil
 	}
 	return out
+}
+
+// FiltersEqual reports whether two sources carry identical import filters. It
+// lets a save distinguish a filter the operator just typed from one already
+// stored, so an invalid pattern predating validation does not block every
+// later save of unrelated settings.
+func FiltersEqual(a, b *SourceConfig) bool {
+	if a.GroupFilterMode != b.GroupFilterMode || a.GroupFilterRegex != b.GroupFilterRegex ||
+		a.LiveCategoryRegex != b.LiveCategoryRegex || a.VODCategoryRegex != b.VODCategoryRegex ||
+		a.SeriesCategoryRegex != b.SeriesCategoryRegex ||
+		a.LiveIncludeRegex != b.LiveIncludeRegex || a.LiveExcludeRegex != b.LiveExcludeRegex ||
+		a.SeriesIncludeRegex != b.SeriesIncludeRegex || a.SeriesExcludeRegex != b.SeriesExcludeRegex ||
+		a.VODIncludeRegex != b.VODIncludeRegex || a.VODExcludeRegex != b.VODExcludeRegex {
+		return false
+	}
+	return slices.Equal(a.GroupFilterList, b.GroupFilterList) &&
+		slices.Equal(a.ImportTypes, b.ImportTypes) &&
+		maps.Equal(a.GroupTypeOverrides, b.GroupTypeOverrides)
 }
 
 // encodeStringList serializes a list for a TEXT column; empty stays "" so the

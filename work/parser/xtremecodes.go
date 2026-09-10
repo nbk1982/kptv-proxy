@@ -355,7 +355,7 @@ func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingCl
 		logger.Debug("{parser/xtremecodes - ParseXtremeCodesAPI} Using cached XC API data for %s", source.Name)
 		var streams []*types.Stream
 		if err := json.Unmarshal([]byte(cached), &streams); err == nil {
-			return streams
+			return adoptSource(streams, source)
 		}
 	}
 

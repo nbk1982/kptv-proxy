@@ -111,6 +111,7 @@ type InternalConstants struct {
 	// work/restream/hls.go — streamSegment()
 	// -------------------------------------------------------------------------
 	HLSSegmentFetchTimeout           time.Duration // HTTP context timeout when fetching a single HLS segment
+	PlaylistFetchTimeout             time.Duration // HTTP context timeout when downloading a source playlist during import
 	HLSMaxConsecutiveSegmentErrors   int           // Max consecutive read errors within a single segment before giving up
 	HLSSegmentActivityUpdateInterval time.Duration // How often LastActivity is refreshed while streaming a segment
 
@@ -408,6 +409,7 @@ var Internal = InternalConstants{
 	HLSPlaylistRefreshInterval:       2 * time.Second,
 	HLSPlaylistFetchTimeout:          10 * time.Second,
 	HLSSegmentFetchTimeout:           30 * time.Second,
+	PlaylistFetchTimeout:             5 * time.Minute,
 	HLSMaxSegmentErrors:              5,
 	HLSMaxConsecutiveSegmentErrors:   5,
 	HLSSegmentActivityUpdateInterval: 5 * time.Second,

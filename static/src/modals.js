@@ -22,12 +22,18 @@ function initModals() {
         const closeBtn = document.getElementById(closeId);
         const cancelBtn = document.getElementById(cancelId);
 
-        if (closeBtn) closeBtn.addEventListener('click', () => hideModal(id));
-        if (cancelBtn) cancelBtn.addEventListener('click', () => hideModal(id));
+        // the source modal owns the filter panel, whose debounced preview must
+        // not fire for a modal the operator has already dismissed
+        const close = id === 'source-modal'
+            ? () => { hideModal(id); closeFilterPanel(); }
+            : () => hideModal(id);
+
+        if (closeBtn) closeBtn.addEventListener('click', close);
+        if (cancelBtn) cancelBtn.addEventListener('click', close);
 
         // Dismiss modal on backdrop click
         modal.addEventListener('click', (e) => {
-            if (e.target === modal) hideModal(id);
+            if (e.target === modal) close();
         });
     });
 }
