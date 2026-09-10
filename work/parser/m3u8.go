@@ -94,7 +94,9 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 	}
 	req = req.WithContext(ctx)
 
-	logger.Info("{parser/m3u8 - ParseM3U8} Source %s: downloading playlist from %s", source.Name, utils.LogURL(cfg, source.URL))
+	// the name only: at INFO the log is routinely shared, and a provider URL
+	// carries the account credentials unless obfuscation is on
+	logger.Info("{parser/m3u8 - ParseM3U8} Source %s: downloading playlist", source.Name)
 	fetchStarted := time.Now()
 
 	resp, err := httpClient.DoWithHeaders(req, source.UserAgent, source.ReqOrigin, source.ReqReferrer)

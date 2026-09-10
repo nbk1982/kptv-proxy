@@ -363,8 +363,9 @@ func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingCl
 	ctx, cancel := context.WithTimeout(ctx, constants.Internal.ImportSourceTimeout)
 	defer cancel()
 
-	logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: fetching Xtream Codes catalog (categories, live, VOD, series) from %s",
-		source.Name, utils.LogURL(cfg, source.URL))
+	// the name only: at INFO the log is routinely shared, and a provider URL
+	// carries the account credentials unless obfuscation is on
+	logger.Info("{parser/xtremecodes - ParseXtremeCodesAPI} Source %s: fetching Xtream Codes catalog (categories, live, VOD, series)", source.Name)
 	fetchStarted := time.Now()
 
 	var liveCategories, seriesCategories, vodCategories []XCCategory
