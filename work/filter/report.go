@@ -4,6 +4,7 @@ package filter
 import (
 	"sort"
 
+	"kptv-proxy/work/config"
 	"kptv-proxy/work/types"
 )
 
@@ -28,20 +29,76 @@ type GroupStat struct {
 	typeCounts  map[types.ContentType]int
 }
 
+// RuleStat describes how one rule of the ordered list performed.
+type RuleStat struct {
+	Index   int    `json:"index"`   // position in the effective list, from 1
+	Origin  string `json:"origin"`  // "source", or "profile:<name>"
+	Field   string `json:"field"`   // group, name, url or any
+	Action  string `json:"action"`  // include or exclude
+	Pattern string `json:"pattern"` // the rule as written
+	Note    string `json:"note"`    // the operator's reminder, if any
+	Matched int    `json:"matched"` // streams the pattern hit, whichever rule decided them
+	Decided int    `json:"decided"` // streams whose verdict came from this rule
+}
+
 // Report is the outcome of one pass over a source's catalog.
 type Report struct {
-	Total       int                             `json:"total"`
-	Kept        int                             `json:"kept"`
-	ByType      map[types.ContentType]*TypeStat `json:"byType"`
-	Groups      []*GroupStat                    `json:"groups"`      // largest group first
-	KeptSamples []string                        `json:"keptSamples"` // the first surviving stream names
-	groups      map[string]*GroupStat
+	Total          int                             `json:"total"`
+	Kept           int                             `json:"kept"`
+	ByType         map[types.ContentType]*TypeStat `json:"byType"`
+	Groups         []*GroupStat                    `json:"groups"`         // largest group first
+	KeptSamples    []string                        `json:"keptSamples"`    // the first surviving stream names
+	Rules          []RuleStat                      `json:"rules"`          // in evaluation order
+	DefaultAction  string                          `json:"defaultAction"`  // verdict applied when no rule matched
+	DefaultDecided int                             `json:"defaultDecided"` // streams settled by that verdict
+	groups         map[string]*GroupStat
+	matched        []int // per-rule match counts, indexed like Rules
+}
+
+// startRules records the rule list a pass is about to evaluate, so the report
+// names every rule even when nothing matches it.
+func (r *Report) startRules(filter *CompiledFilter, withStats bool) {
+	r.DefaultAction = filter.RuleDefault
+	if len(filter.Rules) == 0 {
+		return
+	}
+	r.Rules = make([]RuleStat, len(filter.Rules))
+	for i, rule := range filter.Rules {
+		r.Rules[i] = RuleStat{
+			Index:   i + 1,
+			Origin:  rule.origin,
+			Field:   rule.rule.Field,
+			Action:  rule.rule.Action,
+			Pattern: rule.rule.Pattern,
+			Note:    rule.rule.Note,
+		}
+	}
+	if withStats {
+		r.matched = make([]int, len(filter.Rules))
+	}
+}
+
+// observeRules applies the ordered rule list to one stream and records which
+// rule settled it, returning whether the rules keep it.
+func (r *Report) observeRules(filter *CompiledFilter, stream *types.Stream, group string, withStats bool) bool {
+	if len(filter.Rules) == 0 {
+		return filter.RuleDefault != config.FilterDefaultDrop
+	}
+
+	keep, decidedBy, decided := ruleVerdict(filter.Rules, stream, group, withStats, r.matched)
+	if !decided {
+		r.DefaultDecided++
+		return filter.RuleDefault != config.FilterDefaultDrop
+	}
+	r.Rules[decidedBy].Decided++
+	return keep
 }
 
 // newReport returns an empty report with every content type present, so a
 // consumer can show a zero rather than a missing key.
 func newReport() *Report {
 	return &Report{
+		Rules: []RuleStat{},
 		ByType: map[types.ContentType]*TypeStat{
 			types.ContentTypeLive:   {},
 			types.ContentTypeVOD:    {},
@@ -85,7 +142,8 @@ func (r *Report) observe(group, groupKey string, contentType types.ContentType, 
 	}
 }
 
-// finish settles each group's dominant type and orders the groups by size.
+// finish settles each group's dominant type, folds in the per-rule match
+// counts and orders the groups by size.
 // Ties go to the type listed first here, live, since it is the type every
 // unrecognised stream defaults to anyway.
 func (r *Report) finish() {
@@ -98,6 +156,16 @@ func (r *Report) finish() {
 		}
 		groupStat.ContentType = best
 	}
+	for i := range r.matched {
+		r.Rules[i].Matched = r.matched[i]
+	}
+	// without the extra pass a rule's only certain count is what it decided
+	if r.matched == nil {
+		for i := range r.Rules {
+			r.Rules[i].Matched = r.Rules[i].Decided
+		}
+	}
+
 	sort.SliceStable(r.Groups, func(i, j int) bool {
 		if r.Groups[i].Total != r.Groups[j].Total {
 			return r.Groups[i].Total > r.Groups[j].Total

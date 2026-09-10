@@ -131,3 +131,91 @@ func TestPruneSourceDataDropsUnconfiguredSources(t *testing.T) {
 		t.Fatal("pruning with no sources must clear the import records too")
 	}
 }
+
+func TestFilterProfileCRUDAndSourceAttachment(t *testing.T) {
+	withSchema(t)
+
+	id, err := InsertFilterProfile(FilterProfile{Name: "live only", DefaultAction: "drop", Rules: `[{"field":"group","action":"include","pattern":"^x"}]`})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := InsertFilterProfile(FilterProfile{Name: "live only"}); err == nil {
+		t.Fatal("two profiles must not share a name")
+	}
+
+	got, err := GetFilterProfile(id)
+	if err != nil || got.Name != "live only" || got.DefaultAction != "drop" {
+		t.Fatalf("read back wrong: %+v (%v)", got, err)
+	}
+
+	// attach two sources, one by name and one not
+	for _, s := range []Source{
+		{Name: "A", URI: "http://p/a", FilterProfile: "live only"},
+		{Name: "B", URI: "http://p/b"},
+	} {
+		if _, err := InsertSource(s); err != nil {
+			t.Fatalf("insert source: %v", err)
+		}
+	}
+	usage, err := FilterProfileUsage()
+	if err != nil || usage["live only"] != 1 {
+		t.Fatalf("usage wrong: %v (%v)", usage, err)
+	}
+
+	// a rename has to carry the sources with it
+	if err := UpdateFilterProfile(FilterProfile{ID: id, Name: "tv channels", Rules: got.Rules}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	sources, err := GetAllSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sources {
+		if s.Name == "A" && s.FilterProfile != "tv channels" {
+			t.Fatalf("source A lost its profile: %q", s.FilterProfile)
+		}
+	}
+	usage, _ = FilterProfileUsage()
+	if usage["tv channels"] != 1 || usage["live only"] != 0 {
+		t.Fatalf("usage after rename wrong: %v", usage)
+	}
+
+	// deleting detaches rather than leaving a dangling name
+	if err := DeleteFilterProfile(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	sources, _ = GetAllSources()
+	for _, s := range sources {
+		if s.FilterProfile != "" {
+			t.Fatalf("source %s still names a deleted profile: %q", s.Name, s.FilterProfile)
+		}
+	}
+	if profiles, _ := GetAllFilterProfiles(); len(profiles) != 0 {
+		t.Fatalf("profile not deleted: %+v", profiles)
+	}
+}
+
+func TestSourceRuleColumnsRoundTrip(t *testing.T) {
+	withSchema(t)
+
+	rules := `[{"field":"name","action":"exclude","pattern":"\\[alt\\]"}]`
+	id, err := InsertSource(Source{Name: "A", URI: "http://p/a", FilterProfile: "shared", FilterRules: rules, FilterDefault: "drop"})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, err := GetSource(id)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.FilterProfile != "shared" || got.FilterRules != rules || got.FilterDefault != "drop" {
+		t.Fatalf("round trip lost data: %+v", got)
+	}
+
+	got.FilterProfile, got.FilterDefault = "", ""
+	if err := UpdateSource(got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if again, _ := GetSource(id); again.FilterProfile != "" || again.FilterDefault != "" || again.FilterRules != rules {
+		t.Fatalf("update wrong: %+v", again)
+	}
+}

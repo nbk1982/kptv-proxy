@@ -224,6 +224,18 @@
         @apply w-2.5 h-2.5 rounded-full inline-block flex-shrink-0;
     }
 
+    .rule-row {
+        @apply flex flex-wrap items-center gap-2 px-3 py-2;
+    }
+
+    .rule-select {
+        @apply bg-kptv-gray border border-kptv-border rounded px-1 py-1 text-xs focus:outline-none focus:border-kptv-blue;
+    }
+
+    .rule-move:disabled {
+        @apply opacity-20 cursor-default;
+    }
+
     .group-row {
         @apply flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 hover:bg-kptv-gray-light cursor-pointer;
     }

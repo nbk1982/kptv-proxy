@@ -131,7 +131,7 @@ func TestReportCountsEveryGroupBeforeAndAfter(t *testing.T) {
 		GroupFilterMode: config.GroupFilterInclude,
 		GroupFilterList: []string{"♦️  GLOBO"},
 	}
-	kept, report := Apply(catalog(), src, NewFilterManager())
+	kept, report := Apply(catalog(), src, nil, NewFilterManager(), Options{})
 	if len(kept) != 1 || report.Total != 6 || report.Kept != 1 {
 		t.Fatalf("kept=%d total=%d reportKept=%d", len(kept), report.Total, report.Kept)
 	}
@@ -161,7 +161,7 @@ func TestReportCountsEveryGroupBeforeAndAfter(t *testing.T) {
 }
 
 func TestReportWithoutFiltersStillInventoriesGroups(t *testing.T) {
-	kept, report := Apply(catalog(), &config.SourceConfig{}, NewFilterManager())
+	kept, report := Apply(catalog(), &config.SourceConfig{}, nil, NewFilterManager(), Options{})
 	if len(kept) != 6 || report.Kept != 6 || len(report.Groups) != 6 {
 		t.Fatalf("unfiltered pass must keep all and inventory every group: kept=%d groups=%d", len(kept), len(report.Groups))
 	}
@@ -174,20 +174,20 @@ func TestReportWithoutFiltersStillInventoriesGroups(t *testing.T) {
 func TestGroupRulesInvalidateCachedFilter(t *testing.T) {
 	fm := NewFilterManager()
 	src := &config.SourceConfig{URL: "http://p/list.m3u", GroupFilterMode: config.GroupFilterInclude, GroupFilterList: []string{"♦️  GLOBO"}}
-	first := fm.GetOrCreateFilter(src)
+	first := fm.GetOrCreateFilter(src, nil)
 
 	src.GroupFilterList = append(src.GroupFilterList, "♦️  SBT")
-	if fm.GetOrCreateFilter(src) == first {
+	if fm.GetOrCreateFilter(src, nil) == first {
 		t.Fatal("a changed group list must recompile the filter")
 	}
-	second := fm.GetOrCreateFilter(src)
+	second := fm.GetOrCreateFilter(src, nil)
 	src.GroupTypeOverrides = map[string]string{"♦️  SBT": "vod"}
-	if fm.GetOrCreateFilter(src) == second {
+	if fm.GetOrCreateFilter(src, nil) == second {
 		t.Fatal("a changed override must recompile the filter")
 	}
-	third := fm.GetOrCreateFilter(src)
+	third := fm.GetOrCreateFilter(src, nil)
 	src.ImportTypes = []string{"live"}
-	if fm.GetOrCreateFilter(src) == third {
+	if fm.GetOrCreateFilter(src, nil) == third {
 		t.Fatal("a changed type gate must recompile the filter")
 	}
 }
@@ -224,7 +224,7 @@ func TestReportOrdersGroupsBySizeAndBreaksTypeTiesToLive(t *testing.T) {
 		stream("Tied live", "http://p/play/d/ts", "Tied", types.ContentTypeLive),
 		stream("Tied series", "http://p/play/e", "Tied", types.ContentTypeSeries),
 	}
-	_, report := Apply(streams, &config.SourceConfig{}, NewFilterManager())
+	_, report := Apply(streams, &config.SourceConfig{}, nil, NewFilterManager(), Options{})
 
 	if len(report.Groups) != 3 {
 		t.Fatalf("want 3 groups, got %d", len(report.Groups))

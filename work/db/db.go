@@ -145,8 +145,21 @@ func initSchema(db *sql.DB) error {
 		group_filter_list    TEXT NOT NULL DEFAULT '',
 		group_filter_regex   TEXT NOT NULL DEFAULT '',
 		import_types         TEXT NOT NULL DEFAULT '',
-		group_type_overrides TEXT NOT NULL DEFAULT ''
+		group_type_overrides TEXT NOT NULL DEFAULT '',
+		filter_profile       TEXT NOT NULL DEFAULT '',
+		filter_rules         TEXT NOT NULL DEFAULT '',
+		filter_default       TEXT NOT NULL DEFAULT ''
 	);
+
+	CREATE TABLE IF NOT EXISTS kp_filter_profiles (
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		name           TEXT    NOT NULL,
+		default_action TEXT    NOT NULL DEFAULT '',
+		rules          TEXT    NOT NULL DEFAULT '',
+		updated_at     TEXT    NOT NULL
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_profiles_name ON kp_filter_profiles(name);
 
 	CREATE TABLE IF NOT EXISTS kp_source_groups (
 		source_url   TEXT    NOT NULL,
@@ -403,6 +416,7 @@ func migrateSourceColumns(db *sql.DB) error {
 	for _, col := range []string{
 		"live_cat_regex", "vod_cat_regex", "series_cat_regex",
 		"group_filter_mode", "group_filter_list", "group_filter_regex", "import_types", "group_type_overrides",
+		"filter_profile", "filter_rules", "filter_default",
 	} {
 		if cols[col] {
 			continue

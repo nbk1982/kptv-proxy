@@ -46,6 +46,7 @@ type Config struct {
 	StreamTimeout          time.Duration     `json:"streamTimeout"`
 	MaxConnectionsToApp    int               `json:"maxConnectionsToApp"`
 	Sources                []SourceConfig    `json:"sources"`
+	FilterProfiles         []FilterProfile   `json:"filterProfiles,omitempty"` // reusable rule sets sources can share
 	EPGs                   []EPGConfig       `json:"epgs"`
 	XCOutputAccounts       []XCOutputAccount `json:"xcOutputAccounts"`
 	SDAccounts             []SDAccount       `json:"sdAccounts,omitempty"`
@@ -91,6 +92,9 @@ type SourceConfig struct {
 	GroupFilterRegex       string            `json:"groupFilterRegex,omitempty"`   // pattern on the group label, ORed with the list
 	ImportTypes            []string          `json:"importTypes,omitempty"`        // content types to import; empty means all
 	GroupTypeOverrides     map[string]string `json:"groupTypeOverrides,omitempty"` // group label -> content type forced for that group
+	FilterProfile          string            `json:"filterProfile,omitempty"`      // name of a shared rule set applied before this source's own rules
+	FilterRules            []FilterRule      `json:"filterRules,omitempty"`        // ordered include/exclude rules; first match decides
+	FilterDefault          string            `json:"filterDefault,omitempty"`      // verdict for a stream no rule matched: keep (default) or drop
 	EPGURL                 string            `json:"-"`
 }
 
@@ -340,6 +344,10 @@ func loadFromDB() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.FilterProfiles, err = loadFilterProfilesFromDB()
+	if err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }
@@ -389,9 +397,31 @@ func loadSourcesFromDB() ([]SourceConfig, error) {
 			GroupFilterRegex:       r.GroupFilterRegex,
 			ImportTypes:            decodeStringList(r.ImportTypes),
 			GroupTypeOverrides:     decodeStringMap(r.GroupTypeOverrides),
+			FilterProfile:          r.FilterProfile,
+			FilterRules:            DecodeRules(r.FilterRules),
+			FilterDefault:          r.FilterDefault,
 		})
 	}
 	return sources, nil
+}
+
+// loadFilterProfilesFromDB converts kp_filter_profiles rows into the shared
+// rule sets sources reference by name.
+func loadFilterProfilesFromDB() ([]FilterProfile, error) {
+	rows, err := db.GetAllFilterProfiles()
+	if err != nil {
+		return nil, err
+	}
+	profiles := make([]FilterProfile, 0, len(rows))
+	for _, r := range rows {
+		profiles = append(profiles, FilterProfile{
+			ID:      r.ID,
+			Name:    r.Name,
+			Default: r.DefaultAction,
+			Rules:   DecodeRules(r.Rules),
+		})
+	}
+	return profiles, nil
 }
 
 // loadEPGsFromDB converts kp_epgs rows into EPGConfig values.
@@ -523,6 +553,9 @@ func syncSourcesToDB(sources []SourceConfig) error {
 			GroupFilterRegex:   s.GroupFilterRegex,
 			ImportTypes:        encodeStringList(s.ImportTypes),
 			GroupTypeOverrides: encodeStringMap(s.GroupTypeOverrides),
+			FilterProfile:      s.FilterProfile,
+			FilterRules:        EncodeRules(s.FilterRules),
+			FilterDefault:      s.FilterDefault,
 		}); err != nil {
 			return err
 		}

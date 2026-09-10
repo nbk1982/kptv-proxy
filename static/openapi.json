@@ -100,7 +100,44 @@
           "groupFilterList":        { "type": "array",  "items": { "type": "string" }, "description": "Group labels as the provider spells them; compared case-insensitively with whitespace collapsed" },
           "groupFilterRegex":       { "type": "string", "description": "Pattern on the lowercased group label, ORed with groupFilterList" },
           "importTypes":            { "type": "array",  "items": { "type": "string", "enum": ["live", "vod", "series"] }, "description": "Content types to import; empty means all" },
-          "groupTypeOverrides":     { "type": "object", "additionalProperties": { "type": "string", "enum": ["live", "vod", "series"] }, "description": "Group label -> content type forced for that group" }
+          "groupTypeOverrides":     { "type": "object", "additionalProperties": { "type": "string", "enum": ["live", "vod", "series"] }, "description": "Group label -> content type forced for that group" },
+          "filterProfile":          { "type": "string", "description": "Name of a shared rule set evaluated before this source's own rules" },
+          "filterRules":            { "type": "array",  "items": { "$ref": "#/components/schemas/FilterRule" }, "description": "Ordered keep/drop rules; the first match decides" },
+          "filterDefault":          { "type": "string", "enum": ["", "keep", "drop"], "description": "Verdict for a stream no rule matched; empty means keep" }
+        }
+      },
+      "FilterRule": {
+        "type": "object",
+        "required": ["pattern"],
+        "properties": {
+          "field":   { "type": "string", "enum": ["group", "name", "url", "any"], "default": "group", "description": "Value the pattern is matched against" },
+          "action":  { "type": "string", "enum": ["include", "exclude"], "default": "include", "description": "include keeps the stream, exclude drops it" },
+          "pattern": { "type": "string", "description": "Regular expression, case-insensitive unless it opens with its own flag group, stored exactly as typed" },
+          "note":    { "type": "string", "description": "Free-text reminder shown beside the rule" }
+        }
+      },
+      "FilterProfile": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "id":      { "type": "integer" },
+          "name":    { "type": "string" },
+          "default": { "type": "string", "enum": ["", "keep", "drop"], "description": "Applies unless a source sets its own" },
+          "rules":   { "type": "array", "items": { "$ref": "#/components/schemas/FilterRule" } },
+          "sources": { "type": "array", "items": { "type": "string" }, "description": "Names of the sources attached to it; read-only" }
+        }
+      },
+      "RuleStat": {
+        "type": "object",
+        "properties": {
+          "index":   { "type": "integer", "description": "Position in the effective list, from 1" },
+          "origin":  { "type": "string", "description": "\"source\", or \"profile:<name>\"" },
+          "field":   { "type": "string" },
+          "action":  { "type": "string" },
+          "pattern": { "type": "string" },
+          "note":    { "type": "string" },
+          "matched": { "type": "integer", "description": "Streams the pattern hit, whichever rule decided them" },
+          "decided": { "type": "integer", "description": "Streams whose verdict came from this rule" }
         }
       },
       "TypeStat": {
@@ -124,7 +161,10 @@
           "kept":        { "type": "integer" },
           "byType":      { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/TypeStat" } },
           "groups":      { "type": "array", "items": { "$ref": "#/components/schemas/GroupStat" }, "description": "Largest group first" },
-          "keptSamples": { "type": "array", "items": { "type": "string" } }
+          "keptSamples": { "type": "array", "items": { "type": "string" } },
+          "rules":       { "type": "array", "items": { "$ref": "#/components/schemas/RuleStat" }, "description": "In evaluation order" },
+          "defaultAction":  { "type": "string", "enum": ["", "keep", "drop"] },
+          "defaultDecided": { "type": "integer", "description": "Streams settled by the default because no rule matched" }
         }
       },
       "SourceImport": {
@@ -150,8 +190,9 @@
         "type": "object",
         "required": ["source"],
         "properties": {
-          "source": { "$ref": "#/components/schemas/Source" },
-          "force":  { "type": "boolean", "description": "Re-download the catalog instead of using the cache" }
+          "source":  { "$ref": "#/components/schemas/Source" },
+          "profile": { "$ref": "#/components/schemas/FilterProfile", "description": "Unsaved profile to resolve instead of the stored one of the same name" },
+          "force":   { "type": "boolean", "description": "Re-download the catalog instead of using the cache" }
         }
       },
       "PreviewResponse": {
@@ -507,6 +548,65 @@
         "responses": {
           "200": { "description": "Status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportStatus" } } } },
           "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/filter-profiles": {
+      "get": {
+        "summary": "List the shared filter rule sets",
+        "operationId": "getFilterProfiles",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "responses": {
+          "200": { "description": "Profiles with the sources attached to each", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/FilterProfile" } } } } },
+          "401": { "description": "Unauthorized" }
+        }
+      },
+      "post": {
+        "summary": "Create a shared filter rule set",
+        "operationId": "createFilterProfile",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FilterProfile" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FilterProfile" } } } },
+          "400": { "description": "Invalid rule; the body names the position and the reason" },
+          "401": { "description": "Unauthorized" },
+          "409": { "description": "A profile with that name already exists" }
+        }
+      }
+    },
+    "/api/filter-profiles/{id}": {
+      "put": {
+        "summary": "Replace a shared filter rule set",
+        "description": "A rename re-points every source that named it, so their filters stay attached.",
+        "operationId": "updateFilterProfile",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FilterProfile" } } } },
+        "responses": {
+          "200": { "description": "Saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FilterProfile" } } } },
+          "400": { "description": "Invalid rule" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "No profile with that id" },
+          "409": { "description": "A profile with that name already exists" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a shared filter rule set",
+        "operationId": "deleteFilterProfile",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "force", "in": "query", "required": false, "schema": { "type": "boolean" }, "description": "Delete even while sources use it, detaching them" }
+        ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Success" } } } },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "No profile with that id" },
+          "409": { "description": "Sources still use it; the body lists them" }
         }
       }
     },
