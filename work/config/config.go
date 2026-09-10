@@ -62,31 +62,36 @@ type Config struct {
 // SourceConfig represents the configuration for a single stream source.
 // ActiveConns and EPGURL are runtime-only and never persisted.
 type SourceConfig struct {
-	Name                   string        `json:"name"`
-	URL                    string        `json:"url"`
-	Order                  int           `json:"order"`
-	MaxConnections         int           `json:"maxConnections"`
-	MaxStreamTimeout       time.Duration `json:"maxStreamTimeout"`
-	RetryDelay             time.Duration `json:"retryDelay"`
-	MaxRetries             int           `json:"maxRetries"`
-	MaxFailuresBeforeBlock int           `json:"maxFailuresBeforeBlock"`
-	MinDataSize            int64         `json:"minDataSize"`
-	UserAgent              string        `json:"userAgent"`
-	ReqOrigin              string        `json:"reqOrigin"`
-	ReqReferrer            string        `json:"reqReferrer"`
-	ActiveConns            atomic.Int32  `json:"-"`
-	Username               string        `json:"username"`
-	Password               string        `json:"password"`
-	LiveIncludeRegex       string        `json:"liveIncludeRegex,omitempty"`
-	LiveExcludeRegex       string        `json:"liveExcludeRegex,omitempty"`
-	SeriesIncludeRegex     string        `json:"seriesIncludeRegex,omitempty"`
-	SeriesExcludeRegex     string        `json:"seriesExcludeRegex,omitempty"`
-	VODIncludeRegex        string        `json:"vodIncludeRegex,omitempty"`
-	VODExcludeRegex        string        `json:"vodExcludeRegex,omitempty"`
-	LiveCategoryRegex      string        `json:"liveCategoryRegex,omitempty"`
-	VODCategoryRegex       string        `json:"vodCategoryRegex,omitempty"`
-	SeriesCategoryRegex    string        `json:"seriesCategoryRegex,omitempty"`
-	EPGURL                 string        `json:"-"`
+	Name                   string            `json:"name"`
+	URL                    string            `json:"url"`
+	Order                  int               `json:"order"`
+	MaxConnections         int               `json:"maxConnections"`
+	MaxStreamTimeout       time.Duration     `json:"maxStreamTimeout"`
+	RetryDelay             time.Duration     `json:"retryDelay"`
+	MaxRetries             int               `json:"maxRetries"`
+	MaxFailuresBeforeBlock int               `json:"maxFailuresBeforeBlock"`
+	MinDataSize            int64             `json:"minDataSize"`
+	UserAgent              string            `json:"userAgent"`
+	ReqOrigin              string            `json:"reqOrigin"`
+	ReqReferrer            string            `json:"reqReferrer"`
+	ActiveConns            atomic.Int32      `json:"-"`
+	Username               string            `json:"username"`
+	Password               string            `json:"password"`
+	LiveIncludeRegex       string            `json:"liveIncludeRegex,omitempty"`
+	LiveExcludeRegex       string            `json:"liveExcludeRegex,omitempty"`
+	SeriesIncludeRegex     string            `json:"seriesIncludeRegex,omitempty"`
+	SeriesExcludeRegex     string            `json:"seriesExcludeRegex,omitempty"`
+	VODIncludeRegex        string            `json:"vodIncludeRegex,omitempty"`
+	VODExcludeRegex        string            `json:"vodExcludeRegex,omitempty"`
+	LiveCategoryRegex      string            `json:"liveCategoryRegex,omitempty"`
+	VODCategoryRegex       string            `json:"vodCategoryRegex,omitempty"`
+	SeriesCategoryRegex    string            `json:"seriesCategoryRegex,omitempty"`
+	GroupFilterMode        string            `json:"groupFilterMode,omitempty"`    // GroupFilterOff, GroupFilterInclude or GroupFilterExclude
+	GroupFilterList        []string          `json:"groupFilterList,omitempty"`    // group labels the mode applies to, as the provider spells them
+	GroupFilterRegex       string            `json:"groupFilterRegex,omitempty"`   // pattern on the group label, ORed with the list
+	ImportTypes            []string          `json:"importTypes,omitempty"`        // content types to import; empty means all
+	GroupTypeOverrides     map[string]string `json:"groupTypeOverrides,omitempty"` // group label -> content type forced for that group
+	EPGURL                 string            `json:"-"`
 }
 
 // XCOutputAccount represents an Xtream Codes compatible output account.
@@ -110,32 +115,6 @@ var (
 // UnmarshalJSON implements custom JSON unmarshaling for Config,
 // handling duration fields that arrive as strings from the admin API.
 func (c *Config) UnmarshalJSON(data []byte) error {
-	type SourceAlias struct {
-		Name                   string `json:"name"`
-		URL                    string `json:"url"`
-		Order                  int    `json:"order"`
-		MaxConnections         int    `json:"maxConnections"`
-		MaxStreamTimeout       string `json:"maxStreamTimeout"`
-		RetryDelay             string `json:"retryDelay"`
-		MaxRetries             int    `json:"maxRetries"`
-		MaxFailuresBeforeBlock int    `json:"maxFailuresBeforeBlock"`
-		MinDataSize            int64  `json:"minDataSize"`
-		UserAgent              string `json:"userAgent"`
-		ReqOrigin              string `json:"reqOrigin"`
-		ReqReferrer            string `json:"reqReferrer"`
-		Username               string `json:"username"`
-		Password               string `json:"password"`
-		LiveIncludeRegex       string `json:"liveIncludeRegex"`
-		LiveExcludeRegex       string `json:"liveExcludeRegex"`
-		SeriesIncludeRegex     string `json:"seriesIncludeRegex"`
-		SeriesExcludeRegex     string `json:"seriesExcludeRegex"`
-		VODIncludeRegex        string `json:"vodIncludeRegex"`
-		VODExcludeRegex        string `json:"vodExcludeRegex"`
-		LiveCategoryRegex      string `json:"liveCategoryRegex"`
-		VODCategoryRegex       string `json:"vodCategoryRegex"`
-		SeriesCategoryRegex    string `json:"seriesCategoryRegex"`
-	}
-
 	aux := &struct {
 		BaseURL                string        `json:"baseURL"`
 		BufferSizePerStream    int64         `json:"bufferSizePerStream"`
@@ -155,7 +134,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		FFmpegPreInput         []string      `json:"ffmpegPreInput"`
 		FFmpegPreOutput        []string      `json:"ffmpegPreOutput"`
 		ResponseHeaderTimeout  string        `json:"responseHeaderTimeout"`
-		Sources                []SourceAlias `json:"sources"`
+		Sources                []sourceAlias `json:"sources"`
 		SlowClientBufferChunks int           `json:"slowClientBufferChunks"`
 		TMDBEnabled            bool          `json:"tmdbEnabled"`
 		TMDBAPIKey             string        `json:"tmdbApiKey"`
@@ -207,38 +186,8 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 
 	c.Sources = make([]SourceConfig, len(aux.Sources))
 	for i, s := range aux.Sources {
-		c.Sources[i] = SourceConfig{
-			Name:                   s.Name,
-			URL:                    s.URL,
-			Order:                  s.Order,
-			MaxConnections:         s.MaxConnections,
-			MaxRetries:             s.MaxRetries,
-			MaxFailuresBeforeBlock: s.MaxFailuresBeforeBlock,
-			MinDataSize:            s.MinDataSize,
-			UserAgent:              s.UserAgent,
-			ReqOrigin:              s.ReqOrigin,
-			ReqReferrer:            s.ReqReferrer,
-			Username:               s.Username,
-			Password:               s.Password,
-			LiveIncludeRegex:       s.LiveIncludeRegex,
-			LiveExcludeRegex:       s.LiveExcludeRegex,
-			SeriesIncludeRegex:     s.SeriesIncludeRegex,
-			SeriesExcludeRegex:     s.SeriesExcludeRegex,
-			VODIncludeRegex:        s.VODIncludeRegex,
-			VODExcludeRegex:        s.VODExcludeRegex,
-			LiveCategoryRegex:      s.LiveCategoryRegex,
-			VODCategoryRegex:       s.VODCategoryRegex,
-			SeriesCategoryRegex:    s.SeriesCategoryRegex,
-		}
-		if s.MaxStreamTimeout != "" {
-			if c.Sources[i].MaxStreamTimeout, err = time.ParseDuration(s.MaxStreamTimeout); err != nil {
-				return fmt.Errorf("invalid maxStreamTimeout for source %s: %w", s.Name, err)
-			}
-		}
-		if s.RetryDelay != "" {
-			if c.Sources[i].RetryDelay, err = time.ParseDuration(s.RetryDelay); err != nil {
-				return fmt.Errorf("invalid retryDelay for source %s: %w", s.Name, err)
-			}
+		if err := s.fill(&c.Sources[i]); err != nil {
+			return err
 		}
 	}
 
@@ -435,6 +384,11 @@ func loadSourcesFromDB() ([]SourceConfig, error) {
 			LiveCategoryRegex:      r.LiveCatRegex,
 			VODCategoryRegex:       r.VODCatRegex,
 			SeriesCategoryRegex:    r.SeriesCatRegex,
+			GroupFilterMode:        r.GroupFilterMode,
+			GroupFilterList:        decodeStringList(r.GroupFilterList),
+			GroupFilterRegex:       r.GroupFilterRegex,
+			ImportTypes:            decodeStringList(r.ImportTypes),
+			GroupTypeOverrides:     decodeStringMap(r.GroupTypeOverrides),
 		})
 	}
 	return sources, nil
@@ -541,29 +495,34 @@ func syncSourcesToDB(sources []SourceConfig) error {
 	for i := range sources {
 		s := &sources[i]
 		if _, err := db.InsertSource(db.Source{
-			Name:           s.Name,
-			URI:            s.URL,
-			Username:       s.Username,
-			Password:       s.Password,
-			SortOrder:      s.Order,
-			MaxCnx:         s.MaxConnections,
-			MaxStreamTo:    s.MaxStreamTimeout.String(),
-			RetryDelay:     s.RetryDelay.String(),
-			MaxRetries:     s.MaxRetries,
-			MaxFailures:    s.MaxFailuresBeforeBlock,
-			MinDataSize:    int(s.MinDataSize),
-			UserAgent:      s.UserAgent,
-			ReqOrigin:      s.ReqOrigin,
-			ReqReferer:     s.ReqReferrer,
-			LiveIncRegex:   s.LiveIncludeRegex,
-			LiveExcRegex:   s.LiveExcludeRegex,
-			SeriesIncRegex: s.SeriesIncludeRegex,
-			SeriesExcRegex: s.SeriesExcludeRegex,
-			VODIncRegex:    s.VODIncludeRegex,
-			VODExcRegex:    s.VODExcludeRegex,
-			LiveCatRegex:   s.LiveCategoryRegex,
-			VODCatRegex:    s.VODCategoryRegex,
-			SeriesCatRegex: s.SeriesCategoryRegex,
+			Name:               s.Name,
+			URI:                s.URL,
+			Username:           s.Username,
+			Password:           s.Password,
+			SortOrder:          s.Order,
+			MaxCnx:             s.MaxConnections,
+			MaxStreamTo:        s.MaxStreamTimeout.String(),
+			RetryDelay:         s.RetryDelay.String(),
+			MaxRetries:         s.MaxRetries,
+			MaxFailures:        s.MaxFailuresBeforeBlock,
+			MinDataSize:        int(s.MinDataSize),
+			UserAgent:          s.UserAgent,
+			ReqOrigin:          s.ReqOrigin,
+			ReqReferer:         s.ReqReferrer,
+			LiveIncRegex:       s.LiveIncludeRegex,
+			LiveExcRegex:       s.LiveExcludeRegex,
+			SeriesIncRegex:     s.SeriesIncludeRegex,
+			SeriesExcRegex:     s.SeriesExcludeRegex,
+			VODIncRegex:        s.VODIncludeRegex,
+			VODExcRegex:        s.VODExcludeRegex,
+			LiveCatRegex:       s.LiveCategoryRegex,
+			VODCatRegex:        s.VODCategoryRegex,
+			SeriesCatRegex:     s.SeriesCategoryRegex,
+			GroupFilterMode:    s.GroupFilterMode,
+			GroupFilterList:    encodeStringList(s.GroupFilterList),
+			GroupFilterRegex:   s.GroupFilterRegex,
+			ImportTypes:        encodeStringList(s.ImportTypes),
+			GroupTypeOverrides: encodeStringMap(s.GroupTypeOverrides),
 		}); err != nil {
 			return err
 		}
@@ -572,6 +531,9 @@ func syncSourcesToDB(sources []SourceConfig) error {
 	keep := make([]string, 0, len(sources))
 	for i := range sources {
 		keep = append(keep, sources[i].URL)
+	}
+	if err := db.PruneSourceData(keep); err != nil {
+		return err
 	}
 	return db.PruneSeriesInfo(keep)
 }

@@ -321,6 +321,11 @@ type InternalConstants struct {
 	ServerIdleTO       time.Duration // Max keep-alive idle time between requests
 
 	// -------------------------------------------------------------------------
+	// work/proxy/importctl.go — PreviewSource()
+	// -------------------------------------------------------------------------
+	PreviewCacheTTL time.Duration // How long the last previewed raw catalog is held for re-evaluation
+
+	// -------------------------------------------------------------------------
 	// work/db/db.go — Get()
 	// -------------------------------------------------------------------------
 	DataDir      string // Directory holding the database, EPG cache and legacy config.json
@@ -530,6 +535,7 @@ var Internal = InternalConstants{
 	// -------------------------------------------------------------------------
 	// Server / database
 	// -------------------------------------------------------------------------
+	PreviewCacheTTL:    5 * time.Minute,
 	ServerPort:         8080,
 	ServerReadHeaderTO: 10 * time.Second,
 	ServerReadTO:       60 * time.Second,

@@ -64,7 +64,7 @@ func classifyStreamContent(streamName, streamURL string, existingGroup string) t
 func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg *config.Config, source *config.SourceConfig, rateLimiter ratelimit.Limiter, cache *cache.Cache) []*types.Stream {
 	logger.Debug("{parser/m3u8 - ParseM3U8} Parsing M3U8 from %s", utils.LogURL(cfg, source.URL))
 
-	cacheKey := fmt.Sprintf("m3u8:%s", source.URL)
+	cacheKey := RawCacheKey(source)
 	if cached, found := cache.GetXCData(cacheKey); found {
 		logger.Debug("{parser/m3u8 - ParseM3U8} Using cached M3U8 data for %s", source.Name)
 		var streams []*types.Stream

@@ -95,7 +95,102 @@
           "vodExcludeRegex":        { "type": "string" },
           "liveCategoryRegex":      { "type": "string" },
           "vodCategoryRegex":       { "type": "string" },
-          "seriesCategoryRegex":    { "type": "string" }
+          "seriesCategoryRegex":    { "type": "string" },
+          "groupFilterMode":        { "type": "string", "enum": ["", "include", "exclude"], "description": "\"\" imports every group; include keeps only listed/matching groups; exclude drops them" },
+          "groupFilterList":        { "type": "array",  "items": { "type": "string" }, "description": "Group labels as the provider spells them; compared case-insensitively with whitespace collapsed" },
+          "groupFilterRegex":       { "type": "string", "description": "Pattern on the lowercased group label, ORed with groupFilterList" },
+          "importTypes":            { "type": "array",  "items": { "type": "string", "enum": ["live", "vod", "series"] }, "description": "Content types to import; empty means all" },
+          "groupTypeOverrides":     { "type": "object", "additionalProperties": { "type": "string", "enum": ["live", "vod", "series"] }, "description": "Group label -> content type forced for that group" }
+        }
+      },
+      "TypeStat": {
+        "type": "object",
+        "properties": { "total": { "type": "integer" }, "kept": { "type": "integer" } }
+      },
+      "GroupStat": {
+        "type": "object",
+        "properties": {
+          "name":    { "type": "string", "description": "Provider group label; empty for streams without a group" },
+          "type":    { "type": "string", "enum": ["live", "vod", "series"], "description": "Type most of the group's streams resolved to" },
+          "total":   { "type": "integer" },
+          "kept":    { "type": "integer" },
+          "samples": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "FilterReport": {
+        "type": "object",
+        "properties": {
+          "total":       { "type": "integer" },
+          "kept":        { "type": "integer" },
+          "byType":      { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/TypeStat" } },
+          "groups":      { "type": "array", "items": { "$ref": "#/components/schemas/GroupStat" }, "description": "Largest group first" },
+          "keptSamples": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "SourceImport": {
+        "type": "object",
+        "properties": {
+          "lastImportAt": { "type": "string", "format": "date-time" },
+          "durationMs":   { "type": "integer" },
+          "total":        { "type": "integer" },
+          "kept":         { "type": "integer" },
+          "ok":           { "type": "boolean" },
+          "error":        { "type": "string" }
+        }
+      },
+      "SourceGroups": {
+        "type": "object",
+        "properties": {
+          "url":    { "type": "string" },
+          "groups": { "type": "array", "items": { "$ref": "#/components/schemas/GroupStat" } },
+          "import": { "$ref": "#/components/schemas/SourceImport" }
+        }
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {
+          "source": { "$ref": "#/components/schemas/Source" },
+          "force":  { "type": "boolean", "description": "Re-download the catalog instead of using the cache" }
+        }
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "properties": {
+          "cached":     { "type": "boolean", "description": "Whether the raw catalog was already in memory" },
+          "durationMs": { "type": "integer" },
+          "report":     { "$ref": "#/components/schemas/FilterReport" }
+        }
+      },
+      "ImportRequest": {
+        "type": "object",
+        "properties": {
+          "url":   { "type": "string", "description": "Source to re-download; empty for every source" },
+          "force": { "type": "boolean", "description": "Drop the raw cache first" }
+        }
+      },
+      "ImportStatus": {
+        "type": "object",
+        "properties": {
+          "running":   { "type": "boolean" },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url":          { "type": "string" },
+                "name":         { "type": "string" },
+                "running":      { "type": "boolean" },
+                "lastImportAt": { "type": "string", "format": "date-time" },
+                "durationMs":   { "type": "integer" },
+                "total":        { "type": "integer" },
+                "kept":         { "type": "integer" },
+                "ok":           { "type": "boolean" },
+                "error":        { "type": "string" }
+              }
+            }
+          }
         }
       },
       "EPG": {
@@ -353,6 +448,64 @@
         "responses": {
           "200": { "description": "Saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Success" } } } },
           "400": { "description": "Invalid payload" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/sources/groups": {
+      "get": {
+        "summary": "Group inventory recorded by a source's last import",
+        "operationId": "getSourceGroups",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "parameters": [{ "name": "url", "in": "query", "required": true, "schema": { "type": "string" }, "description": "URL of a configured source" }],
+        "responses": {
+          "200": { "description": "Groups with counts and detected type", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroups" } } } },
+          "400": { "description": "url missing" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "No source with that URL" }
+        }
+      }
+    },
+    "/api/sources/preview": {
+      "post": {
+        "summary": "Evaluate a draft source's filters against its catalog without saving",
+        "operationId": "previewSource",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreviewRequest" } } } },
+        "responses": {
+          "200": { "description": "Filter report", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreviewResponse" } } } },
+          "400": { "description": "Invalid source or filter; the body names the field" },
+          "401": { "description": "Unauthorized" },
+          "502": { "description": "The provider could not be fetched or returned no streams" }
+        }
+      }
+    },
+    "/api/import": {
+      "post": {
+        "summary": "Import every source now, in the background",
+        "description": "Applies saved filters without a restart. Sources whose raw catalog is still cached are not downloaded again unless force is set.",
+        "operationId": "triggerImport",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportRequest" } } } },
+        "responses": {
+          "202": { "description": "Import started" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "No source with that URL" },
+          "409": { "description": "An import is already running" }
+        }
+      }
+    },
+    "/api/import/status": {
+      "get": {
+        "summary": "Import progress and each source's last outcome",
+        "operationId": "importStatus",
+        "tags": ["Configuration"],
+        "security": [{"bearerAuth": []},{"cookieAuth": []}],
+        "responses": {
+          "200": { "description": "Status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImportStatus" } } } },
           "401": { "description": "Unauthorized" }
         }
       }

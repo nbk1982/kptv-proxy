@@ -487,7 +487,7 @@
                 </div>
                 <div class="srctype-tab-content">
                     <div class="active">
-                        <div class="mb-4">
+                        <div class="mb-4 flex flex-wrap items-center gap-2">
                             <button
                                 class="px-4 py-2 bg-kptv-blue hover:bg-kptv-blue-light rounded transition-colors flex items-center space-x-2"
                                 id="add-source-btn">
@@ -497,6 +497,18 @@
                                 </svg>
                                 <span>Add Source</span>
                             </button>
+                            <button
+                                class="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-60 rounded transition-colors flex items-center space-x-2"
+                                id="import-all-btn" title="Re-import every source now, applying the current filters">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                <span>Import Now</span>
+                            </button>
+                            <span id="import-banner" class="text-sm text-gray-400 flex items-center gap-2" hidden>
+                                <span class="spinner-sm"></span><span id="import-banner-text">Importing…</span>
+                            </span>
                         </div>
                         <div id="sources-container"></div>
                     </div>
@@ -715,7 +727,7 @@
     <!-- source modal -->
     <div id="source-modal" class="modal">
         <div
-            class="modal-content bg-kptv-gray rounded border border-kptv-border w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
+            class="modal-content bg-kptv-gray rounded border border-kptv-border w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
             <div
                 class="border-b border-kptv-border bg-kptv-gray-light px-4 py-3 flex justify-between items-center sticky top-0">
                 <h2 class="text-xl font-semibold" id="source-modal-title">Add Source</h2>
@@ -814,69 +826,145 @@
                             </div>
                         </div>
                         <div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Live Category Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-live-category-regex" placeholder="^(canais|tv)">
+                            <!-- summary + preview controls -->
+                            <div class="flex flex-wrap items-center justify-between gap-3 mb-5 p-3 rounded border border-kptv-border bg-kptv-gray-light">
+                                <div class="text-sm min-w-0">
+                                    <div id="filter-summary-main" class="font-medium">No catalog loaded yet</div>
+                                    <div id="filter-summary-sub" class="text-xs text-gray-400 mt-0.5">Preview downloads the playlist, lists its groups and shows what the rules keep.</div>
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">VOD Category Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-vod-category-regex" placeholder="(filmes|movies)">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Series Category Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-series-category-regex" placeholder="(series|s[0-9]{2}e[0-9]{2})">
-                                </div>
-                            </div>
-                            <div class="text-xs text-gray-400 mt-4 mb-4">Category patterns decide whether an entry is
-                            Live, VOD or Series; the include/exclude patterns below decide which of those entries are kept.
-                            All of them are matched against the stream name, its group and its URL. Series wins over VOD,
-                            which wins over Live; an entry matching none of them keeps the importer's own classification.
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Live Include Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-live-include-regex" placeholder=".*live.*">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Live Exclude Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-live-exclude-regex" placeholder=".*adult.*">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Series Include Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-series-include-regex" placeholder=".*series.*">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">Series Exclude Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-series-exclude-regex" placeholder=".*adult.*">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">VOD Include Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-vod-include-regex" placeholder=".*movie.*">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">VOD Exclude Regex</label>
-                                    <input
-                                        class="w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue"
-                                        type="text" id="source-vod-exclude-regex" placeholder=".*adult.*">
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    <button type="button" id="filter-preview-btn"
+                                        class="px-3 py-1.5 bg-kptv-blue hover:bg-kptv-blue-light disabled:opacity-60 rounded text-sm flex items-center gap-2 transition-colors">
+                                        <span id="filter-preview-spinner" class="spinner-sm" hidden></span>
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                        </svg>
+                                        <span id="filter-preview-label">Preview</span>
+                                    </button>
+                                    <button type="button" id="filter-refetch-btn" title="Re-download the catalog from the provider"
+                                        class="p-1.5 bg-kptv-gray border border-kptv-border hover:bg-kptv-border disabled:opacity-60 rounded text-gray-300 transition-colors">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
+
+                            <!-- content types -->
+                            <section class="mb-5">
+                                <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                                    <h3 class="text-sm font-semibold">Content types</h3>
+                                    <span class="text-xs text-gray-400">Switch a type off to drop everything classified as it</span>
+                                </div>
+                                <div id="filter-type-toggles" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <button type="button" class="type-toggle on" data-type="live" aria-pressed="true">
+                                        <span class="type-dot bg-green-600"></span><span class="font-medium">Live</span><span class="type-count ml-auto text-xs text-gray-400 tabular-nums"></span>
+                                    </button>
+                                    <button type="button" class="type-toggle on" data-type="vod" aria-pressed="true">
+                                        <span class="type-dot bg-orange-600"></span><span class="font-medium">VOD</span><span class="type-count ml-auto text-xs text-gray-400 tabular-nums"></span>
+                                    </button>
+                                    <button type="button" class="type-toggle on" data-type="series" aria-pressed="true">
+                                        <span class="type-dot bg-kptv-blue"></span><span class="font-medium">Series</span><span class="type-count ml-auto text-xs text-gray-400 tabular-nums"></span>
+                                    </button>
+                                </div>
+                            </section>
+
+                            <!-- groups -->
+                            <section class="mb-5">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                                    <h3 class="text-sm font-semibold">Groups</h3>
+                                    <div id="filter-group-mode" class="seg" role="group" aria-label="Group filter mode">
+                                        <button type="button" class="seg-btn active" data-mode="">All groups</button>
+                                        <button type="button" class="seg-btn" data-mode="include">Only selected</button>
+                                        <button type="button" class="seg-btn" data-mode="exclude">All except selected</button>
+                                    </div>
+                                </div>
+                                <div id="filter-group-mode-hint" class="text-xs text-gray-400 mb-2">Every group is imported. Tick a group to keep only what you choose.</div>
+                                <div class="rounded border border-kptv-border overflow-hidden">
+                                    <div class="flex flex-wrap items-center gap-2 p-2 bg-kptv-gray-light border-b border-kptv-border">
+                                        <input type="search" id="filter-group-search" placeholder="Search groups…" autocomplete="off"
+                                            class="flex-1 min-w-[10rem] bg-kptv-gray border border-kptv-border rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-kptv-blue">
+                                        <div id="filter-group-type-chips" class="flex gap-1">
+                                            <button type="button" class="chip active" data-type="">All</button>
+                                            <button type="button" class="chip" data-type="live">Live</button>
+                                            <button type="button" class="chip" data-type="vod">VOD</button>
+                                            <button type="button" class="chip" data-type="series">Series</button>
+                                        </div>
+                                        <span class="w-px h-5 bg-kptv-border hidden sm:block"></span>
+                                        <button type="button" id="filter-group-select-visible" class="chip">Select visible</button>
+                                        <button type="button" id="filter-group-clear" class="chip">Clear</button>
+                                    </div>
+                                    <div id="filter-group-list" class="max-h-72 overflow-y-auto divide-y divide-kptv-border"></div>
+                                    <div class="flex flex-wrap justify-between gap-2 px-3 py-2 text-xs text-gray-400 bg-kptv-gray-light border-t border-kptv-border">
+                                        <span id="filter-group-footer">No groups loaded</span>
+                                        <span id="filter-group-selected">Nothing selected</span>
+                                    </div>
+                                </div>
+                                <details class="mt-2" id="filter-group-regex-details">
+                                    <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-200">Group pattern (advanced)</summary>
+                                    <input class="filter-input mt-2" type="text" id="source-group-filter-regex" placeholder="^(canais|tv)" autocomplete="off">
+                                    <div class="text-xs text-gray-400 mt-1">Matched against the lowercased group label and combined with the selection above, so one pattern can stand in for many ticks. Lowercase patterns only.</div>
+                                </details>
+                            </section>
+
+                            <!-- name and URL patterns -->
+                            <details class="mb-5 rounded border border-kptv-border" id="filter-patterns-details">
+                                <summary class="px-3 py-2 text-sm font-semibold cursor-pointer hover:bg-kptv-gray-light">Name &amp; URL patterns <span class="text-xs font-normal text-gray-400 ml-1">(advanced)</span></summary>
+                                <div class="p-3 border-t border-kptv-border">
+                                    <div class="text-xs text-gray-400 mb-3">Patterns are matched against the stream name, its group and its URL, all lowercased, so write them in lowercase. A type with an include pattern keeps only matching entries; an exclude pattern then drops any that match.</div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <div class="rounded border border-kptv-border p-3">
+                                            <div class="flex items-center gap-2 mb-2"><span class="type-dot bg-green-600"></span><span class="text-sm font-medium">Live</span></div>
+                                            <label class="block text-xs text-gray-400 mb-1">Include</label>
+                                            <input class="filter-input mb-2" type="text" id="source-live-include-regex" placeholder="fhd$" autocomplete="off">
+                                            <label class="block text-xs text-gray-400 mb-1">Exclude</label>
+                                            <input class="filter-input" type="text" id="source-live-exclude-regex" placeholder="adult|xxx" autocomplete="off">
+                                        </div>
+                                        <div class="rounded border border-kptv-border p-3">
+                                            <div class="flex items-center gap-2 mb-2"><span class="type-dot bg-orange-600"></span><span class="text-sm font-medium">VOD</span></div>
+                                            <label class="block text-xs text-gray-400 mb-1">Include</label>
+                                            <input class="filter-input mb-2" type="text" id="source-vod-include-regex" placeholder="4k|uhd" autocomplete="off">
+                                            <label class="block text-xs text-gray-400 mb-1">Exclude</label>
+                                            <input class="filter-input" type="text" id="source-vod-exclude-regex" placeholder="adult|xxx" autocomplete="off">
+                                        </div>
+                                        <div class="rounded border border-kptv-border p-3">
+                                            <div class="flex items-center gap-2 mb-2"><span class="type-dot bg-kptv-blue"></span><span class="text-sm font-medium">Series</span></div>
+                                            <label class="block text-xs text-gray-400 mb-1">Include</label>
+                                            <input class="filter-input mb-2" type="text" id="source-series-include-regex" placeholder="\[l\]" autocomplete="off">
+                                            <label class="block text-xs text-gray-400 mb-1">Exclude</label>
+                                            <input class="filter-input" type="text" id="source-series-exclude-regex" placeholder="adult|xxx" autocomplete="off">
+                                        </div>
+                                    </div>
+                                    <div class="mt-4 pt-3 border-t border-kptv-border">
+                                        <div class="text-sm font-medium mb-1">Type detection patterns</div>
+                                        <div class="text-xs text-gray-400 mb-3">Decide whether an entry is Live, VOD or Series when the provider's own classification is wrong. Series wins over VOD, which wins over Live; an entry matching none keeps the importer's classification. Forcing a type on a group above outranks these.</div>
+                                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Live</label>
+                                                <input class="filter-input" type="text" id="source-live-category-regex" placeholder="^(canais|tv)" autocomplete="off">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">VOD</label>
+                                                <input class="filter-input" type="text" id="source-vod-category-regex" placeholder="(filmes|movies)" autocomplete="off">
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs text-gray-400 mb-1">Series</label>
+                                                <input class="filter-input" type="text" id="source-series-category-regex" placeholder="(series|s[0-9]{2}e[0-9]{2})" autocomplete="off">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+
+                            <!-- preview result -->
+                            <section id="filter-result" hidden>
+                                <div class="flex items-baseline justify-between mb-2">
+                                    <h3 class="text-sm font-semibold">Kept streams</h3>
+                                    <span id="filter-result-note" class="text-xs text-gray-400"></span>
+                                </div>
+                                <div id="filter-result-samples" class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 rounded border border-kptv-border bg-kptv-gray-light"></div>
+                            </section>
                         </div>
                         <div>
                             <div class="space-y-4">

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"kptv-proxy/work/buffer"
 	"kptv-proxy/work/cache"
@@ -70,6 +71,11 @@ type StreamProxy struct {
 	importGeneration      atomic.Uint64                        // bumped on each committed import so cached playlists are not reused across imports
 	groupIndex            atomic.Pointer[map[string]struct{}]  // lowercased set of known group titles, rebuilt on each committed import
 	nameIndex             atomic.Pointer[map[string]string]   // sanitized channel name -> real channel name, rebuilt on each committed import
+	importMu              sync.Mutex                           // serializes catalog imports so a manual run never interleaves with the scheduled one
+	importRunning         atomic.Bool                          // true while ImportStreams holds importMu, read by the admin status endpoint
+	importStartedAt       atomic.Int64                         // unix nanoseconds at which the running import began
+	importingSources      *xsync.MapOf[string, time.Time]      // source URL -> fetch start, for per-source progress in the admin UI
+	preview               previewSlot                          // raw catalog of the last previewed source, for quick re-evaluation
 }
 
 // New creates and initializes a new StreamProxy instance with all required dependencies.
@@ -93,6 +99,7 @@ func New(cfg *config.Config, bufferPool *buffer.BufferPool, httpClient *client.H
 		SourceRateLimiters:    make(map[string]ratelimit.Limiter),
 		rateLimiterMutex:      sync.RWMutex{},
 		FilterManager:         filter.NewFilterManager(),
+		importingSources:      xsync.NewMapOf[string, time.Time](),
 	}
 
 	// initialize all rate limiters upfront to avoid lazy creation during imports
@@ -216,6 +223,14 @@ func (sp *StreamProxy) ImportStreams() {
 		}
 	}()
 
+	// one import at a time: a run triggered from the admin UI must not
+	// interleave with the scheduled refresh or a graceful restart
+	sp.importMu.Lock()
+	defer sp.importMu.Unlock()
+	sp.importRunning.Store(true)
+	sp.importStartedAt.Store(time.Now().UnixNano())
+	defer sp.importRunning.Store(false)
+
 	ctx, cancel := context.WithTimeout(context.Background(), constants.Internal.ImportGlobalTimeout)
 	defer cancel()
 
@@ -244,6 +259,10 @@ func (sp *StreamProxy) ImportStreams() {
 			}
 			defer func() { <-importSemaphore }()
 
+			started := time.Now()
+			sp.importingSources.Store(src.URL, started)
+			defer sp.importingSources.Delete(src.URL)
+
 			currentConns := src.ActiveConns.Load()
 			if currentConns >= int32(src.MaxConnections) {
 				logger.Warn("{proxy/stream - ImportStreams} Cannot import from source (connection limit %d/%d): %s",
@@ -264,34 +283,27 @@ func (sp *StreamProxy) ImportStreams() {
 			srcCtx, srcCancel := context.WithTimeout(ctx, constants.Internal.ImportSourceTimeout)
 			defer srcCancel()
 
-			rateLimiter := sp.getRateLimiterForSource(src)
-
-			var streams []*types.Stream
-			if src.Username != "" && src.Password != "" {
-				logger.Debug("{proxy/stream - ImportStreams} Parsing Xtreme Codes API source: %s", src.Name)
-				streams = parser.ParseXtremeCodesAPI(srcCtx, sp.ImportClient, sp.Config, src, rateLimiter, sp.Cache)
-			} else {
-				logger.Debug("{proxy/stream - ImportStreams} Parsing M3U8 source: %s", src.Name)
-				streams = parser.ParseM3U8(srcCtx, sp.ImportClient, sp.Config, src, rateLimiter, sp.Cache)
-			}
+			streams := sp.FetchSourceStreams(srcCtx, src)
 
 			if srcCtx.Err() != nil {
 				logger.Warn("{proxy/stream - ImportStreams} Source timed out or was cancelled, keeping previous catalog: %s", src.Name)
+				sp.recordSourceImport(src, nil, started, errors.New("fetch timed out or was cancelled"))
 				return
 			}
 
 			if len(streams) == 0 {
 				logger.Warn("{proxy/stream - ImportStreams} Source returned no streams, keeping previous catalog: %s", src.Name)
+				sp.recordSourceImport(src, nil, started, errors.New("source returned no streams"))
 				return
 			}
 
-			if sp != nil && sp.FilterManager != nil {
-				beforeFilter := len(streams)
-				streams = filter.FilterStreams(streams, src, sp.FilterManager)
-				if beforeFilter != len(streams) {
-					logger.Debug("{proxy/stream - ImportStreams} Filtered %d streams down to %d for source: %s", beforeFilter, len(streams), src.Name)
-				}
+			beforeFilter := len(streams)
+			var report *filter.Report
+			streams, report = filter.Apply(streams, src, sp.FilterManager)
+			if beforeFilter != len(streams) {
+				logger.Debug("{proxy/stream - ImportStreams} Filtered %d streams down to %d for source: %s", beforeFilter, len(streams), src.Name)
 			}
+			sp.recordSourceImport(src, report, started, nil)
 
 			if src.Username != "" && src.Password != "" {
 				logger.Debug("{proxy/stream - ImportStreams} Parsed %d streams from Xtreme Codes API: %s", len(streams), utils.LogURL(sp.Config, src.URL))

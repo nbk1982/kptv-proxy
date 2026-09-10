@@ -350,7 +350,7 @@ func processXCBatches[T any](ctx context.Context, items []T, workers int, proces
 func ParseXtremeCodesAPI(ctx context.Context, httpClient *client.HeaderSettingClient, cfg *config.Config, source *config.SourceConfig, rateLimiter ratelimit.Limiter, cache *cache.Cache) []*types.Stream {
 	logger.Debug("{parser/xtremecodes - ParseXtremeCodesAPI} from %s with optimized batch processing", utils.LogURL(cfg, source.URL))
 
-	cacheKey := fmt.Sprintf("xc:v2:%s:%s:%s", source.URL, source.Username, source.Password)
+	cacheKey := RawCacheKey(source)
 	if cached, found := cache.GetXCData(cacheKey); found {
 		logger.Debug("{parser/xtremecodes - ParseXtremeCodesAPI} Using cached XC API data for %s", source.Name)
 		var streams []*types.Stream

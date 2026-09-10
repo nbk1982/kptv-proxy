@@ -8,43 +8,54 @@ import (
 
 // Source mirrors the kp_sources row for transport between the database
 // and the rest of the application. Duration fields are stored as strings
-// (e.g. "30s", "5s") matching the existing config file convention.
+// (e.g. "30s", "5s") matching the existing config file convention; the list
+// and map filter fields are stored as JSON text, "" when unset.
 type Source struct {
-	ID             int64
-	Name           string
-	URI            string
-	Username       string
-	Password       string
-	SortOrder      int
-	MaxCnx         int
-	MaxStreamTo    string
-	RetryDelay     string
-	MaxRetries     int
-	MaxFailures    int
-	MinDataSize    int
-	UserAgent      string
-	ReqOrigin      string
-	ReqReferer     string
-	LiveIncRegex   string
-	LiveExcRegex   string
-	SeriesIncRegex string
-	SeriesExcRegex string
-	VODIncRegex    string
-	VODExcRegex    string
-	LiveCatRegex   string
-	VODCatRegex    string
-	SeriesCatRegex string
+	ID                 int64
+	Name               string
+	URI                string
+	Username           string
+	Password           string
+	SortOrder          int
+	MaxCnx             int
+	MaxStreamTo        string
+	RetryDelay         string
+	MaxRetries         int
+	MaxFailures        int
+	MinDataSize        int
+	UserAgent          string
+	ReqOrigin          string
+	ReqReferer         string
+	LiveIncRegex       string
+	LiveExcRegex       string
+	SeriesIncRegex     string
+	SeriesExcRegex     string
+	VODIncRegex        string
+	VODExcRegex        string
+	LiveCatRegex       string
+	VODCatRegex        string
+	SeriesCatRegex     string
+	GroupFilterMode    string
+	GroupFilterList    string
+	GroupFilterRegex   string
+	ImportTypes        string
+	GroupTypeOverrides string
 }
 
-// GetAllSources returns every source row ordered by sort_order ascending.
-func GetAllSources() ([]Source, error) {
-	rows, err := GetReader().Query(`
-		SELECT id, name, uri, uname, pword, sort_order, max_cnx,
+// sourceColumns is the column list every kp_sources query reads, in Scan order.
+const sourceColumns = `id, name, uri, uname, pword, sort_order, max_cnx,
 		       max_stream_to, retry_delay, max_retries, max_failures,
 		       min_data_size, user_agent, req_origin, req_referer,
 		       live_inc_regex, live_exc_regex, series_inc_regex,
 		       series_exc_regex, vod_inc_regex, vod_exc_regex,
-		       live_cat_regex, vod_cat_regex, series_cat_regex
+		       live_cat_regex, vod_cat_regex, series_cat_regex,
+		       group_filter_mode, group_filter_list, group_filter_regex,
+		       import_types, group_type_overrides`
+
+// GetAllSources returns every source row ordered by sort_order ascending.
+func GetAllSources() ([]Source, error) {
+	rows, err := GetReader().Query(`
+		SELECT ` + sourceColumns + `
 		FROM kp_sources
 		ORDER BY sort_order ASC`)
 	if err != nil {
@@ -59,12 +70,7 @@ func GetAllSources() ([]Source, error) {
 // Returns sql.ErrNoRows if the ID does not exist.
 func GetSource(id int64) (Source, error) {
 	row := GetReader().QueryRow(`
-		SELECT id, name, uri, uname, pword, sort_order, max_cnx,
-		       max_stream_to, retry_delay, max_retries, max_failures,
-		       min_data_size, user_agent, req_origin, req_referer,
-		       live_inc_regex, live_exc_regex, series_inc_regex,
-		       series_exc_regex, vod_inc_regex, vod_exc_regex,
-		       live_cat_regex, vod_cat_regex, series_cat_regex
+		SELECT `+sourceColumns+`
 		FROM kp_sources WHERE id = ?`, id)
 
 	var s Source
@@ -83,14 +89,18 @@ func InsertSource(s Source) (int64, error) {
 			 retry_delay, max_retries, max_failures, min_data_size, user_agent,
 			 req_origin, req_referer, live_inc_regex, live_exc_regex,
 			 series_inc_regex, series_exc_regex, vod_inc_regex, vod_exc_regex,
-			 live_cat_regex, vod_cat_regex, series_cat_regex)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 live_cat_regex, vod_cat_regex, series_cat_regex,
+			 group_filter_mode, group_filter_list, group_filter_regex,
+			 import_types, group_type_overrides)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
 		s.LiveIncRegex, s.LiveExcRegex, s.SeriesIncRegex, s.SeriesExcRegex,
 		s.VODIncRegex, s.VODExcRegex, s.LiveCatRegex, s.VODCatRegex,
 		s.SeriesCatRegex,
+		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
+		s.ImportTypes, s.GroupTypeOverrides,
 	)
 	if err != nil {
 		logger.Error("{db/sources - InsertSource} %v", err)
@@ -108,14 +118,18 @@ func UpdateSource(s Source) error {
 			min_data_size=?, user_agent=?, req_origin=?, req_referer=?,
 			live_inc_regex=?, live_exc_regex=?, series_inc_regex=?,
 			series_exc_regex=?, vod_inc_regex=?, vod_exc_regex=?,
-			live_cat_regex=?, vod_cat_regex=?, series_cat_regex=?
+			live_cat_regex=?, vod_cat_regex=?, series_cat_regex=?,
+			group_filter_mode=?, group_filter_list=?, group_filter_regex=?,
+			import_types=?, group_type_overrides=?
 		WHERE id=?`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
 		s.LiveIncRegex, s.LiveExcRegex, s.SeriesIncRegex, s.SeriesExcRegex,
 		s.VODIncRegex, s.VODExcRegex, s.LiveCatRegex, s.VODCatRegex,
-		s.SeriesCatRegex, s.ID,
+		s.SeriesCatRegex,
+		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
+		s.ImportTypes, s.GroupTypeOverrides, s.ID,
 	)
 	if err != nil {
 		logger.Error("{db/sources - UpdateSource} id=%d: %v", s.ID, err)
@@ -137,14 +151,7 @@ func scanSources(rows *sql.Rows) ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		if err := rows.Scan(
-			&s.ID, &s.Name, &s.URI, &s.Username, &s.Password,
-			&s.SortOrder, &s.MaxCnx, &s.MaxStreamTo, &s.RetryDelay,
-			&s.MaxRetries, &s.MaxFailures, &s.MinDataSize, &s.UserAgent,
-			&s.ReqOrigin, &s.ReqReferer, &s.LiveIncRegex, &s.LiveExcRegex,
-			&s.SeriesIncRegex, &s.SeriesExcRegex, &s.VODIncRegex, &s.VODExcRegex,
-			&s.LiveCatRegex, &s.VODCatRegex, &s.SeriesCatRegex,
-		); err != nil {
+		if err := rows.Scan(sourceFields(&s)...); err != nil {
 			logger.Error("{db/sources - scanSources} scan failed: %v", err)
 			return nil, err
 		}
@@ -155,12 +162,19 @@ func scanSources(rows *sql.Rows) ([]Source, error) {
 
 // scanSource scans a single *sql.Row into a Source.
 func scanSource(row *sql.Row, s *Source) error {
-	return row.Scan(
+	return row.Scan(sourceFields(s)...)
+}
+
+// sourceFields returns Scan destinations in sourceColumns order.
+func sourceFields(s *Source) []any {
+	return []any{
 		&s.ID, &s.Name, &s.URI, &s.Username, &s.Password,
 		&s.SortOrder, &s.MaxCnx, &s.MaxStreamTo, &s.RetryDelay,
 		&s.MaxRetries, &s.MaxFailures, &s.MinDataSize, &s.UserAgent,
 		&s.ReqOrigin, &s.ReqReferer, &s.LiveIncRegex, &s.LiveExcRegex,
 		&s.SeriesIncRegex, &s.SeriesExcRegex, &s.VODIncRegex, &s.VODExcRegex,
 		&s.LiveCatRegex, &s.VODCatRegex, &s.SeriesCatRegex,
-	)
+		&s.GroupFilterMode, &s.GroupFilterList, &s.GroupFilterRegex,
+		&s.ImportTypes, &s.GroupTypeOverrides,
+	}
 }
