@@ -179,6 +179,10 @@ function initFilterPanel() {
         input.addEventListener('input', () => { validateRegexInput(input); scheduleFilterPreview(); });
     });
 
+    document.getElementById('source-quality-dedupe').addEventListener('change', () => scheduleFilterPreview());
+    const tiers = document.getElementById('source-quality-tiers');
+    tiers.addEventListener('input', () => { validateQualityTiersInput(tiers); scheduleFilterPreview(); });
+
     // result browser controls; each change re-reads the cached catalog
     document.getElementById('filter-result-verdict').addEventListener('click', (e) => {
         const btn = e.target.closest('.seg-btn');
@@ -329,6 +333,9 @@ function resetFilterPanel(source) {
     applySourceProfile();
 
     document.getElementById('source-group-filter-regex').value = (source && source.groupFilterRegex) || '';
+    document.getElementById('source-quality-dedupe').checked = !!(source && source.qualityDedupe);
+    document.getElementById('source-quality-tiers').value = ((source && source.qualityTiers) || []).join(', ');
+    validateQualityTiersInput(document.getElementById('source-quality-tiers'));
     document.getElementById('filter-group-search').value = '';
     document.getElementById('filter-result-search').value = '';
     document.getElementById('filter-group-regex-details').open = !!(source && source.groupFilterRegex);
@@ -394,7 +401,35 @@ function collectFilterFields() {
         groupFilterRegex: document.getElementById('source-group-filter-regex').value,
         importTypes: panel.types.size === FILTER_TYPES.length ? [] : FILTER_TYPES.filter(t => panel.types.has(t)),
         groupTypeOverrides: overrides,
+        qualityDedupe: document.getElementById('source-quality-dedupe').checked,
+        qualityTiers: parseQualityTiers(document.getElementById('source-quality-tiers').value),
     };
+}
+
+/**
+ * Splits the comma-separated tier list as the API stores it: one pattern per
+ * tier, best first, blanks dropped. Empty means the server defaults.
+ * @param {string} value
+ * @returns {Array<string>}
+ */
+function parseQualityTiers(value) {
+    return String(value || '').split(',').map(t => t.trim()).filter(Boolean);
+}
+
+/**
+ * Flags a tier list with a pattern the browser cannot compile, the way
+ * validateRegexInput does for a single pattern.
+ * @param {HTMLInputElement} input
+ * @returns {boolean} whether every tier looks valid
+ */
+function validateQualityTiersInput(input) {
+    let ok = true;
+    parseQualityTiers(input.value).forEach(tier => {
+        try { new RegExp(`\\b(?:${tier})\\b`, 'i'); } catch (e) { ok = false; }
+    });
+    input.classList.toggle('invalid', !ok);
+    input.title = ok ? '' : 'One of the tiers does not compile';
+    return ok;
 }
 
 /**
@@ -456,7 +491,9 @@ async function runFilterPreview(force, auto = false) {
         if (!auto) showNotification('Enter the source URL first', 'warning');
         return;
     }
-    const patternsOk = FILTER_REGEX_IDS.every(id => validateRegexInput(document.getElementById(id))) && sourceRuleEditor.validate();
+    const patternsOk = FILTER_REGEX_IDS.every(id => validateRegexInput(document.getElementById(id)))
+        && validateQualityTiersInput(document.getElementById('source-quality-tiers'))
+        && sourceRuleEditor.validate();
     if (!patternsOk) {
         if (!auto) showNotification('Fix the highlighted pattern first', 'warning');
         return;
@@ -658,7 +695,10 @@ function renderFilterSummary() {
         const unmatched = (report.rules || []).length
             ? ` · ${formatCount(report.defaultDecided)} matched no rule and were ${report.defaultAction === 'drop' ? 'dropped' : 'kept'}`
             : '';
-        sub.textContent = `${FILTER_TYPES.map(part).join(' · ')}${unmatched} · ${report.cached ? 'evaluated from cache' : 'downloaded'} in ${secs}s`;
+        const quality = report.qualityDropped
+            ? ` · ${formatCount(report.qualityDropped)} lower-quality variants dropped`
+            : '';
+        sub.textContent = `${FILTER_TYPES.map(part).join(' · ')}${unmatched}${quality} · ${report.cached ? 'evaluated from cache' : 'downloaded'} in ${secs}s`;
         return;
     }
     if (filterPanel.groups.length) {
@@ -748,12 +788,14 @@ function renderFilterVerdictRow(v) {
         group: 'group filter',
         type: 'type gate',
         pattern: 'name/URL pattern',
+        quality: 'lower quality',
     }[v.stage] || v.stage;
     const stageTitle = {
         default: 'No rule matched; the default applied',
         group: 'Removed by the group picker or group pattern',
         type: 'Its content type is not imported',
         pattern: "Removed by the type's include/exclude patterns",
+        quality: 'A better quality variant of this channel is kept',
     };
     const title = rule
         ? `${rule.action === 'exclude' ? 'Drop' : 'Keep'} · ${rule.field} ~ ${rule.pattern}${rule.note ? ' — ' + rule.note : ''}`

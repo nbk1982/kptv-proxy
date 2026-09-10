@@ -43,6 +43,8 @@ type Source struct {
 	FilterProfile      string
 	FilterRules        string
 	FilterDefault      string
+	QualityDedupe      string // "1" when the best-quality-only stage is on, "" otherwise
+	QualityTiers       string // JSON list of tier patterns, "" for the defaults
 }
 
 // sourceColumns is the column list every kp_sources query reads, in Scan order.
@@ -54,7 +56,8 @@ const sourceColumns = `id, name, uri, uname, pword, sort_order, max_cnx,
 		       live_cat_regex, vod_cat_regex, series_cat_regex,
 		       group_filter_mode, group_filter_list, group_filter_regex,
 		       import_types, group_type_overrides,
-		       filter_profile, filter_rules, filter_default`
+		       filter_profile, filter_rules, filter_default,
+		       quality_dedupe, quality_tiers`
 
 // GetAllSources returns every source row ordered by sort_order ascending.
 func GetAllSources() ([]Source, error) {
@@ -96,8 +99,9 @@ func InsertSource(s Source) (int64, error) {
 			 live_cat_regex, vod_cat_regex, series_cat_regex,
 			 group_filter_mode, group_filter_list, group_filter_regex,
 			 import_types, group_type_overrides,
-			 filter_profile, filter_rules, filter_default)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 filter_profile, filter_rules, filter_default,
+			 quality_dedupe, quality_tiers)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
@@ -107,6 +111,7 @@ func InsertSource(s Source) (int64, error) {
 		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
 		s.ImportTypes, s.GroupTypeOverrides,
 		s.FilterProfile, s.FilterRules, s.FilterDefault,
+		s.QualityDedupe, s.QualityTiers,
 	)
 	if err != nil {
 		logger.Error("{db/sources - InsertSource} %v", err)
@@ -127,7 +132,8 @@ func UpdateSource(s Source) error {
 			live_cat_regex=?, vod_cat_regex=?, series_cat_regex=?,
 			group_filter_mode=?, group_filter_list=?, group_filter_regex=?,
 			import_types=?, group_type_overrides=?,
-			filter_profile=?, filter_rules=?, filter_default=?
+			filter_profile=?, filter_rules=?, filter_default=?,
+			quality_dedupe=?, quality_tiers=?
 		WHERE id=?`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
@@ -137,7 +143,8 @@ func UpdateSource(s Source) error {
 		s.SeriesCatRegex,
 		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
 		s.ImportTypes, s.GroupTypeOverrides,
-		s.FilterProfile, s.FilterRules, s.FilterDefault, s.ID,
+		s.FilterProfile, s.FilterRules, s.FilterDefault,
+		s.QualityDedupe, s.QualityTiers, s.ID,
 	)
 	if err != nil {
 		logger.Error("{db/sources - UpdateSource} id=%d: %v", s.ID, err)
@@ -185,5 +192,6 @@ func sourceFields(s *Source) []any {
 		&s.GroupFilterMode, &s.GroupFilterList, &s.GroupFilterRegex,
 		&s.ImportTypes, &s.GroupTypeOverrides,
 		&s.FilterProfile, &s.FilterRules, &s.FilterDefault,
+		&s.QualityDedupe, &s.QualityTiers,
 	}
 }

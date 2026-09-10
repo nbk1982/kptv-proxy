@@ -978,6 +978,25 @@
                                 </div>
                             </section>
 
+                            <!-- quality variants -->
+                            <section class="mb-5">
+                                <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                                    <h3 class="text-sm font-semibold">Quality variants</h3>
+                                    <span class="text-xs text-gray-400">Runs last, on what the rules kept</span>
+                                </div>
+                                <label class="flex items-start gap-2 text-sm cursor-pointer">
+                                    <input type="checkbox" id="source-quality-dedupe" class="accent-kptv-blue mt-0.5 flex-shrink-0">
+                                    <span>Keep only the best quality of each channel
+                                        <span class="block text-xs text-gray-400 mt-0.5">When the same channel comes in several qualities, only the best is imported: <span class="text-gray-200">A&amp;E HD</span> is dropped because <span class="text-gray-200">A&amp;E FHD</span> is kept, while a channel that exists only in HD is untouched. Variants are recognised by the quality marker in the name; the rest of the name must be identical.</span>
+                                    </span>
+                                </label>
+                                <div class="mt-2 pl-6">
+                                    <label class="block text-xs text-gray-400 mb-1">Quality tiers, best first, one pattern per tier separated by commas</label>
+                                    <input class="filter-input" type="text" id="source-quality-tiers" placeholder="4k|uhd|2160p, fhd|full ?hd|1080p, hd|720p, sd|480p" autocomplete="off">
+                                    <div class="text-xs text-gray-400 mt-1">Leave empty for the defaults shown. Each tier is matched as a whole word, case-insensitively, so <span class="text-gray-200">hd</span> does not match <span class="text-gray-200">hdr</span>.</div>
+                                </div>
+                            </section>
+
                             <!-- groups -->
                             <section class="mb-5">
                                 <div class="flex flex-wrap items-center justify-between gap-2 mb-1">

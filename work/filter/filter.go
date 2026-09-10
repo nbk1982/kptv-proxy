@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -41,6 +42,7 @@ type CompiledFilter struct {
 	SeriesExclude  *regexp.Regexp
 	VODInclude     *regexp.Regexp
 	VODExclude     *regexp.Regexp
+	QualityTiers   []*regexp.Regexp // quality markers best first; nil when the quality stage is off
 	signature      string
 }
 
@@ -131,6 +133,8 @@ func filterSignature(source *config.SourceConfig, rules ruleSet) string {
 		source.GroupFilterRegex,
 		strings.Join(source.ImportTypes, "\x01"),
 		strings.Join(overrides, "\x01"),
+		strconv.FormatBool(source.QualityDedupe),
+		strings.Join(source.QualityTiers, "\x01"),
 	}, "\x00")
 }
 
@@ -196,6 +200,17 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig, cfg *con
 		// before it existed can still carry them
 		for _, group := range slices.Sorted(maps.Keys(source.GroupTypeOverrides)) {
 			filter.GroupTypes[config.GroupKey(group)] = types.ContentType(source.GroupTypeOverrides[group])
+		}
+	}
+	if source.QualityDedupe {
+		tiers := source.QualityTiers
+		if len(tiers) == 0 {
+			tiers = config.DefaultQualityTiers
+		}
+		for _, tier := range tiers {
+			if re := compilePattern("QualityTiers", config.QualityTierPattern(tier)); re != nil {
+				filter.QualityTiers = append(filter.QualityTiers, re)
+			}
 		}
 	}
 
@@ -354,10 +369,7 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Con
 	logger.Debug("{filter - Apply} Applying filters to %d streams from source %s\n", len(streams), source.Name)
 	filter := filterManager.GetOrCreateFilter(source, cfg)
 	report.startRules(filter, opts.RuleStats)
-	kept := make([]*types.Stream, 0, len(streams))
-	if opts.Verdicts {
-		report.Verdicts = make([]Verdict, 0, len(streams))
-	}
+	outcomes := make([]outcome, 0, len(streams))
 
 	for _, stream := range streams {
 		group := GroupOf(stream)
@@ -383,20 +395,110 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Con
 				keep, stage = false, StagePattern
 			}
 		}
-		logger.Debug("{filter - Apply} Stream: %s, Group: %s, Type: %s, Include: %v\n", stream.Name, group, contentType, keep)
+		outcomes = append(outcomes, outcome{stream: stream, group: group, groupKey: groupKey, contentType: contentType, keep: keep, stage: stage, rule: decidedBy + 1})
+	}
 
-		report.observe(group, groupKey, contentType, stream.Name, keep)
+	// the quality stage needs every verdict in hand: whether "A&E HD" stays
+	// depends on whether "A&E FHD" survived the stages above
+	report.QualityDropped = applyQualityDedupe(outcomes, filter)
+
+	kept := make([]*types.Stream, 0, len(outcomes))
+	if opts.Verdicts {
+		report.Verdicts = make([]Verdict, 0, len(outcomes))
+	}
+	for _, o := range outcomes {
+		logger.Debug("{filter - Apply} Stream: %s, Group: %s, Type: %s, Include: %v\n", o.stream.Name, o.group, o.contentType, o.keep)
+		report.observe(o.group, o.groupKey, o.contentType, o.stream.Name, o.keep)
 		if opts.Verdicts {
-			report.Verdicts = append(report.Verdicts, Verdict{Name: stream.Name, Group: group, Type: contentType, Kept: keep, Stage: stage, Rule: decidedBy + 1})
+			report.Verdicts = append(report.Verdicts, Verdict{Name: o.stream.Name, Group: o.group, Type: o.contentType, Kept: o.keep, Stage: o.stage, Rule: o.rule})
 		}
-		if keep {
-			kept = append(kept, stream)
+		if o.keep {
+			kept = append(kept, o.stream)
 		}
 	}
 	report.finish()
 	logger.Debug("{filter - Apply} Filtered %d -> %d streams for source %s\n", len(streams), len(kept), source.Name)
 
 	return kept, report
+}
+
+// outcome is one stream's verdict while a pass is still in flight, before it
+// is written into the report: the quality stage needs the whole catalog's
+// verdicts before any of them is final.
+type outcome struct {
+	stream      *types.Stream
+	group       string
+	groupKey    string
+	contentType types.ContentType
+	keep        bool
+	stage       string
+	rule        int // 1-based deciding rule, 0 when none
+}
+
+// qualityRank places a stream name in the source's quality tiers: the index of
+// the first tier whose marker the name carries (0 is best) and the name with
+// that marker removed, lowercased and with stray separators trimmed, which is
+// what sibling variants are matched on. ok is false when no tier matches, so
+// a name without a quality marker never takes part in the stage.
+func (f *CompiledFilter) qualityRank(name string) (rank int, base string, ok bool) {
+	for i, tier := range f.QualityTiers {
+		loc := tier.FindStringIndex(name)
+		if loc == nil {
+			continue
+		}
+		stripped := name[:loc[0]] + " " + name[loc[1]:]
+		base = strings.Join(strings.Fields(strings.ToLower(stripped)), " ")
+		base = strings.Trim(base, " -|[]()/:·")
+		return i, base, true
+	}
+	return 0, "", false
+}
+
+// applyQualityDedupe drops, among the streams still kept, every variant of a
+// channel that a better-quality variant of the same content type outranks. A
+// stream carrying no quality marker, or whose better siblings were dropped by
+// an earlier stage, is left alone: HD only goes when FHD is actually there.
+// Returns how many streams it dropped.
+func applyQualityDedupe(outcomes []outcome, filter *CompiledFilter) int {
+	if len(filter.QualityTiers) == 0 {
+		return 0
+	}
+
+	type mark struct {
+		rank int
+		key  string
+	}
+	marks := make([]mark, len(outcomes))
+	best := make(map[string]int)
+	for i := range outcomes {
+		marks[i].rank = -1
+		o := &outcomes[i]
+		if !o.keep {
+			continue
+		}
+		rank, base, ok := filter.qualityRank(o.stream.Name)
+		if !ok {
+			continue
+		}
+		// typed, so a film and a channel that share a name never compete
+		key := string(o.contentType) + "\x00" + base
+		marks[i] = mark{rank: rank, key: key}
+		if b, seen := best[key]; !seen || rank < b {
+			best[key] = rank
+		}
+	}
+
+	dropped := 0
+	for i := range outcomes {
+		m := marks[i]
+		if m.rank < 0 || m.rank <= best[m.key] {
+			continue
+		}
+		outcomes[i].keep = false
+		outcomes[i].stage = StageQuality
+		dropped++
+	}
+	return dropped
 }
 
 // FilterStreams applies a source's filters and returns the surviving streams.

@@ -64,6 +64,8 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 			FilterProfile          string              `json:"filterProfile"`
 			FilterRules            []config.FilterRule `json:"filterRules"`
 			FilterDefault          string              `json:"filterDefault"`
+			QualityDedupe          bool                `json:"qualityDedupe"`
+			QualityTiers           []string            `json:"qualityTiers"`
 		}
 		sources := make([]sourceOut, len(cfg.Sources))
 		for i := range cfg.Sources {
@@ -89,6 +91,8 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 				FilterProfile:      s.FilterProfile,
 				FilterRules:        nonNilRules(s.FilterRules),
 				FilterDefault:      s.FilterDefault,
+				QualityDedupe:      s.QualityDedupe,
+				QualityTiers:       nonNilList(s.QualityTiers),
 			}
 		}
 

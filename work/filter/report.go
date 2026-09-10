@@ -48,6 +48,7 @@ const (
 	StageGroup   = "group"   // dropped by the group picker or group pattern
 	StageType    = "type"    // dropped by the content type gate
 	StagePattern = "pattern" // dropped by the type's include/exclude patterns
+	StageQuality = "quality" // dropped because a better quality variant of the channel is kept
 )
 
 // Verdict is one stream's outcome in a pass: whether it survives and which
@@ -74,6 +75,7 @@ type Report struct {
 	Rules          []RuleStat                      `json:"rules"`          // in evaluation order
 	DefaultAction  string                          `json:"defaultAction"`  // verdict applied when no rule matched
 	DefaultDecided int                             `json:"defaultDecided"` // streams settled by that verdict
+	QualityDropped int                             `json:"qualityDropped"` // lower-quality variants removed because a better one is kept
 	Verdicts       []Verdict                       `json:"-"`              // every stream's outcome, only with Options.Verdicts; paged by the caller
 	groups         map[string]*GroupStat
 	matched        []int // per-rule match counts, indexed like Rules
