@@ -43,6 +43,42 @@ func GroupKey(name string) string {
 	return strings.Join(strings.Fields(strings.ToLower(name)), " ")
 }
 
+// DefaultQualityTiers rank the quality markers providers put in channel names,
+// best first, for the quality stage of the filter. Each entry is a pattern; a
+// source replaces the list when its provider's naming differs.
+var DefaultQualityTiers = []string{"4k|uhd|2160p", "fhd|full ?hd|1080p", "hd|720p", "sd|480p"}
+
+// QualityTierPattern wraps one tier so it matches a whole marker, case-
+// insensitively, and never a fragment of another word: "hd" must not match
+// "hdr", nor "sd" the "sd" in "sdtv".
+func QualityTierPattern(tier string) string {
+	return `(?i)\b(?:` + tier + `)\b`
+}
+
+// normalizeQualityTiers trims the tiers and drops blanks. nil means "use
+// DefaultQualityTiers".
+func normalizeQualityTiers(tiers []string) []string {
+	out := make([]string, 0, len(tiers))
+	for _, t := range tiers {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// encodeBool serializes a flag for a TEXT column: "1" or "", so off and the
+// column default are the same value.
+func encodeBool(v bool) string {
+	if v {
+		return "1"
+	}
+	return ""
+}
+
 // sourceAlias is the wire shape of a source in the admin API and the legacy
 // config file: durations travel as strings such as "30s".
 type sourceAlias struct {
@@ -77,6 +113,8 @@ type sourceAlias struct {
 	FilterProfile          string            `json:"filterProfile"`
 	FilterRules            []FilterRule      `json:"filterRules"`
 	FilterDefault          string            `json:"filterDefault"`
+	QualityDedupe          bool              `json:"qualityDedupe"`
+	QualityTiers           []string          `json:"qualityTiers"`
 }
 
 // fill copies the alias into dst, parsing the duration strings. It writes
@@ -113,6 +151,8 @@ func (s sourceAlias) fill(dst *SourceConfig) error {
 		FilterProfile:          s.FilterProfile,
 		FilterRules:            s.FilterRules,
 		FilterDefault:          s.FilterDefault,
+		QualityDedupe:          s.QualityDedupe,
+		QualityTiers:           s.QualityTiers,
 	}
 
 	var err error
@@ -146,6 +186,7 @@ func ParseSourceJSON(data []byte, dst *SourceConfig) error {
 // is the engine's job, not the caller's.
 func (s *SourceConfig) HasContentFilters() bool {
 	return s.FilterProfile != "" || len(s.FilterRules) > 0 || s.FilterDefault == FilterDefaultDrop ||
+		s.QualityDedupe ||
 		s.GroupFilterMode != GroupFilterOff || s.GroupFilterRegex != "" ||
 		len(s.ImportTypes) > 0 || len(s.GroupTypeOverrides) > 0 ||
 		s.LiveCategoryRegex != "" || s.VODCategoryRegex != "" || s.SeriesCategoryRegex != "" ||
@@ -243,6 +284,13 @@ func (s *SourceConfig) NormalizeFilters() error {
 	}
 	s.GroupTypeOverrides = overrides
 
+	s.QualityTiers = normalizeQualityTiers(s.QualityTiers)
+	for _, tier := range s.QualityTiers {
+		if _, err := regexp.Compile(QualityTierPattern(tier)); err != nil {
+			return fmt.Errorf("source %q: quality tier %q is not a valid pattern: %v", s.Name, tier, err)
+		}
+	}
+
 	for _, p := range []struct{ field, pattern string }{
 		{"groupFilterRegex", s.GroupFilterRegex},
 		{"liveCategoryRegex", s.LiveCategoryRegex},
@@ -305,6 +353,9 @@ func FiltersEqual(a, b *SourceConfig) bool {
 	}
 	if a.FilterProfile != b.FilterProfile || a.FilterDefault != b.FilterDefault ||
 		!slices.Equal(a.FilterRules, b.FilterRules) {
+		return false
+	}
+	if a.QualityDedupe != b.QualityDedupe || !slices.Equal(a.QualityTiers, b.QualityTiers) {
 		return false
 	}
 	return slices.Equal(a.GroupFilterList, b.GroupFilterList) &&

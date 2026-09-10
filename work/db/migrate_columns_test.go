@@ -45,7 +45,8 @@ const selectList = `
 	       live_cat_regex, vod_cat_regex, series_cat_regex,
 	       group_filter_mode, group_filter_list, group_filter_regex,
 	       import_types, group_type_overrides,
-	       filter_profile, filter_rules, filter_default
+	       filter_profile, filter_rules, filter_default,
+	       quality_dedupe, quality_tiers
 	FROM kp_sources ORDER BY sort_order ASC`
 
 func openTemp(t *testing.T, name string) *sql.DB {
@@ -77,7 +78,7 @@ func TestMigrateSourceColumnsUpgradesLegacyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tableColumns: %v", err)
 	}
-	for _, want := range []string{"live_cat_regex", "vod_cat_regex", "series_cat_regex", "group_filter_mode", "group_filter_list", "group_filter_regex", "import_types", "group_type_overrides", "filter_profile", "filter_rules", "filter_default"} {
+	for _, want := range []string{"live_cat_regex", "vod_cat_regex", "series_cat_regex", "group_filter_mode", "group_filter_list", "group_filter_regex", "import_types", "group_type_overrides", "filter_profile", "filter_rules", "filter_default", "quality_dedupe", "quality_tiers"} {
 		if !cols[want] {
 			t.Fatalf("column %s missing after migration", want)
 		}
@@ -102,7 +103,8 @@ func TestMigrateSourceColumnsUpgradesLegacyDatabase(t *testing.T) {
 	if got[0].LiveCatRegex != "" || got[0].VODCatRegex != "" || got[0].SeriesCatRegex != "" ||
 		got[0].GroupFilterMode != "" || got[0].GroupFilterList != "" || got[0].GroupFilterRegex != "" ||
 		got[0].ImportTypes != "" || got[0].GroupTypeOverrides != "" ||
-		got[0].FilterProfile != "" || got[0].FilterRules != "" || got[0].FilterDefault != "" {
+		got[0].FilterProfile != "" || got[0].FilterRules != "" || got[0].FilterDefault != "" ||
+		got[0].QualityDedupe != "" || got[0].QualityTiers != "" {
 		t.Fatalf("new columns should backfill empty, got %+v", got[0])
 	}
 
@@ -122,8 +124,8 @@ func TestInitSchemaThenMigrateIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tableColumns: %v", err)
 	}
-	if len(cols) != 32 {
-		t.Fatalf("fresh kp_sources should have 32 columns, got %d: %v", len(cols), cols)
+	if len(cols) != 34 {
+		t.Fatalf("fresh kp_sources should have 34 columns, got %d: %v", len(cols), cols)
 	}
 	if err := migrateSourceColumns(d); err != nil {
 		t.Fatalf("migrate on fresh schema: %v", err)

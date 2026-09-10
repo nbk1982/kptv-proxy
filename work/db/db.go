@@ -148,7 +148,9 @@ func initSchema(db *sql.DB) error {
 		group_type_overrides TEXT NOT NULL DEFAULT '',
 		filter_profile       TEXT NOT NULL DEFAULT '',
 		filter_rules         TEXT NOT NULL DEFAULT '',
-		filter_default       TEXT NOT NULL DEFAULT ''
+		filter_default       TEXT NOT NULL DEFAULT '',
+		quality_dedupe       TEXT NOT NULL DEFAULT '',
+		quality_tiers        TEXT NOT NULL DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS kp_filter_profiles (
@@ -417,6 +419,7 @@ func migrateSourceColumns(db *sql.DB) error {
 		"live_cat_regex", "vod_cat_regex", "series_cat_regex",
 		"group_filter_mode", "group_filter_list", "group_filter_regex", "import_types", "group_type_overrides",
 		"filter_profile", "filter_rules", "filter_default",
+		"quality_dedupe", "quality_tiers",
 	} {
 		if cols[col] {
 			continue

@@ -95,6 +95,8 @@ type SourceConfig struct {
 	FilterProfile          string            `json:"filterProfile,omitempty"`      // name of a shared rule set applied before this source's own rules
 	FilterRules            []FilterRule      `json:"filterRules,omitempty"`        // ordered include/exclude rules; first match decides
 	FilterDefault          string            `json:"filterDefault,omitempty"`      // verdict for a stream no rule matched: keep (default) or drop
+	QualityDedupe          bool              `json:"qualityDedupe,omitempty"`      // keep only the best quality variant of a channel (drop "X HD" when "X FHD" is kept)
+	QualityTiers           []string          `json:"qualityTiers,omitempty"`       // quality markers best first, one pattern per tier; empty means DefaultQualityTiers
 	EPGURL                 string            `json:"-"`
 }
 
@@ -400,6 +402,8 @@ func loadSourcesFromDB() ([]SourceConfig, error) {
 			FilterProfile:          r.FilterProfile,
 			FilterRules:            DecodeRules(r.FilterRules),
 			FilterDefault:          r.FilterDefault,
+			QualityDedupe:          r.QualityDedupe == "1",
+			QualityTiers:           decodeStringList(r.QualityTiers),
 		})
 	}
 	return sources, nil
@@ -556,6 +560,8 @@ func syncSourcesToDB(sources []SourceConfig) error {
 			FilterProfile:      s.FilterProfile,
 			FilterRules:        EncodeRules(s.FilterRules),
 			FilterDefault:      s.FilterDefault,
+			QualityDedupe:      encodeBool(s.QualityDedupe),
+			QualityTiers:       encodeStringList(s.QualityTiers),
 		}); err != nil {
 			return err
 		}
