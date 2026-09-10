@@ -18,9 +18,13 @@ const FILTER_REGEX_IDS = [
     'source-vod-include-regex', 'source-vod-exclude-regex',
 ];
 
+/** Streams per page in the result browser; the server caps it at the same value. */
+const FILTER_RESULT_PAGE_SIZE = 1000;
+
 /** Panel state, replaced every time the source modal opens. */
 let filterPanel = null;
 let filterPreviewTimer = null;
+let filterResultSearchTimer = null;
 let sourceRuleEditor = null;
 
 /**
@@ -51,6 +55,8 @@ function newFilterPanelState() {
         inventoryAt: null,       // when the inventory shown was recorded
         loading: false,
         pending: false,          // a rule changed while a preview was in flight
+        list: { verdict: 'kept', type: '', q: '', page: 1 }, // what the result browser lists
+        listPage: null,          // the page of per-stream verdicts from the last preview
     };
 }
 
@@ -58,7 +64,10 @@ function newFilterPanelState() {
  * Wires the panel's controls once at startup.
  */
 function initFilterPanel() {
-    sourceRuleEditor = createRuleEditor('source-rules', { onChange: () => { renderFilterDefaultHint(); scheduleFilterPreview(); } });
+    sourceRuleEditor = createRuleEditor('source-rules', {
+        onChange: () => { renderFilterDefaultHint(); scheduleFilterPreview(); },
+        onInput: () => scheduleFilterPreview(),
+    });
     document.getElementById('source-rules').addEventListener('change', () => renderFilterDefaultHint());
 
     // a new rule always keeps: guessing from the default surprises the operator
@@ -166,9 +175,49 @@ function initFilterPanel() {
 
     FILTER_REGEX_IDS.forEach(id => {
         const input = document.getElementById(id);
-        input.addEventListener('input', () => validateRegexInput(input));
-        input.addEventListener('change', () => scheduleFilterPreview());
+        // the preview follows the typing; a pattern mid-edit simply waits
+        input.addEventListener('input', () => { validateRegexInput(input); scheduleFilterPreview(); });
     });
+
+    // result browser controls; each change re-reads the cached catalog
+    document.getElementById('filter-result-verdict').addEventListener('click', (e) => {
+        const btn = e.target.closest('.seg-btn');
+        if (!btn || !filterPanel) return;
+        filterPanel.list.verdict = btn.dataset.verdict;
+        filterPanel.list.page = 1;
+        renderFilterResult();
+        runFilterPreview(false, true);
+    });
+    document.getElementById('filter-result-type-chips').addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip || !filterPanel) return;
+        filterPanel.list.type = chip.dataset.type;
+        filterPanel.list.page = 1;
+        renderFilterResult();
+        runFilterPreview(false, true);
+    });
+    document.getElementById('filter-result-search').addEventListener('input', (e) => {
+        if (!filterPanel) return;
+        filterPanel.list.q = e.target.value;
+        filterPanel.list.page = 1;
+        clearTimeout(filterResultSearchTimer);
+        filterResultSearchTimer = setTimeout(() => runFilterPreview(false, true), 300);
+    });
+    document.getElementById('filter-result-prev').addEventListener('click', () => turnFilterResultPage(-1));
+    document.getElementById('filter-result-next').addEventListener('click', () => turnFilterResultPage(1));
+}
+
+/**
+ * Moves the result browser one page in either direction.
+ * @param {number} dir - -1 or 1
+ */
+function turnFilterResultPage(dir) {
+    if (!filterPanel || !filterPanel.listPage) return;
+    const pages = Math.max(1, Math.ceil(filterPanel.listPage.total / filterPanel.listPage.size));
+    const next = Math.min(pages, Math.max(1, filterPanel.list.page + dir));
+    if (next === filterPanel.list.page) return;
+    filterPanel.list.page = next;
+    runFilterPreview(false, true);
 }
 
 /** @returns {string} the verdict for a stream no rule matched */
@@ -281,6 +330,7 @@ function resetFilterPanel(source) {
 
     document.getElementById('source-group-filter-regex').value = (source && source.groupFilterRegex) || '';
     document.getElementById('filter-group-search').value = '';
+    document.getElementById('filter-result-search').value = '';
     document.getElementById('filter-group-regex-details').open = !!(source && source.groupFilterRegex);
     document.getElementById('filter-patterns-details').open = FILTER_REGEX_IDS.slice(1)
         .some(id => document.getElementById(id).value.trim() !== '');
@@ -368,8 +418,10 @@ function validateRegexInput(input) {
  */
 function scheduleFilterPreview() {
     if (!filterPanel || !filterPanel.report) return;
+    // the rules changed, so the result list starts over from its first page
+    filterPanel.list.page = 1;
     clearTimeout(filterPreviewTimer);
-    filterPreviewTimer = setTimeout(() => runFilterPreview(false), 700);
+    filterPreviewTimer = setTimeout(() => runFilterPreview(false, true), 500);
 }
 
 /**
@@ -378,15 +430,20 @@ function scheduleFilterPreview() {
  */
 function closeFilterPanel() {
     clearTimeout(filterPreviewTimer);
+    clearTimeout(filterResultSearchTimer);
     filterPreviewTimer = null;
+    filterResultSearchTimer = null;
     filterPanel = null;
 }
 
 /**
  * Evaluates the draft rules against the provider's catalog.
  * @param {boolean} force - re-download the catalog instead of using the cache
+ * @param {boolean} [auto] - triggered by typing rather than a click: a draft
+ *   that is not ready (no URL, a pattern mid-edit) waits quietly instead of
+ *   raising a notification on every keystroke
  */
-async function runFilterPreview(force) {
+async function runFilterPreview(force, auto = false) {
     if (!filterPanel) return;
     if (filterPanel.loading) {
         // re-evaluate once the running preview lands, otherwise the result
@@ -396,11 +453,12 @@ async function runFilterPreview(force) {
     }
     const draft = readSourceForm();
     if (!draft.url) {
-        showNotification('Enter the source URL first', 'warning');
+        if (!auto) showNotification('Enter the source URL first', 'warning');
         return;
     }
-    if (FILTER_REGEX_IDS.some(id => !validateRegexInput(document.getElementById(id)))) {
-        showNotification('Fix the highlighted pattern first', 'warning');
+    const patternsOk = FILTER_REGEX_IDS.every(id => validateRegexInput(document.getElementById(id))) && sourceRuleEditor.validate();
+    if (!patternsOk) {
+        if (!auto) showNotification('Fix the highlighted pattern first', 'warning');
         return;
     }
 
@@ -408,14 +466,16 @@ async function runFilterPreview(force) {
     panel.loading = true;
     panel.pending = false;
     renderFilterSummary();
+    renderFilterResult();
     try {
         const result = await apiCall('/api/sources/preview', {
             method: 'POST',
-            body: JSON.stringify({ source: draft, force }),
+            body: JSON.stringify({ source: draft, force, list: { ...panel.list, size: FILTER_RESULT_PAGE_SIZE } }),
             quiet: true,
         });
         if (panel !== filterPanel) return;
         panel.report = { ...result.report, cached: result.cached, durationMs: result.durationMs };
+        panel.listPage = result.list || null;
         setFilterGroups(result.report.groups || []);
         sourceRuleEditor.setStats(result.report.rules || []);
         panel.inventoryAt = null;
@@ -427,7 +487,7 @@ async function runFilterPreview(force) {
             renderFilterPanel();
             if (panel.pending) {
                 panel.pending = false;
-                runFilterPreview(false);
+                runFilterPreview(false, true);
             }
         }
     }
@@ -612,19 +672,101 @@ function renderFilterSummary() {
     sub.textContent = 'Preview downloads the playlist, lists its groups and shows what the rules keep.';
 }
 
-/** The result block: kept-stream samples from the last preview. */
+/**
+ * The result browser: a page of streams with the verdict each received,
+ * filtered by verdict, type and a text search. Rows stay on screen while a
+ * re-evaluation is in flight, so typing a pattern refines the list in place
+ * instead of blanking it on every keystroke.
+ */
 function renderFilterResult() {
     const section = document.getElementById('filter-result');
     const report = filterPanel.report;
     section.hidden = !report;
     if (!report) return;
 
-    const list = document.getElementById('filter-result-samples');
-    const samples = report.keptSamples || [];
-    list.innerHTML = samples.length
-        ? samples.map(n => `<span class="px-2 py-0.5 rounded bg-kptv-gray border border-kptv-border text-xs">${escapeHtml(n)}</span>`).join('')
-        : '<span class="text-sm text-orange-300">Nothing survives these rules.</span>';
-    document.getElementById('filter-result-note').textContent = samples.length < report.kept
-        ? `Showing the first ${samples.length} of ${formatCount(report.kept)} kept streams`
-        : `All ${formatCount(report.kept)} kept streams`;
+    const list = filterPanel.list;
+    const page = filterPanel.listPage;
+
+    document.querySelectorAll('#filter-result-verdict .seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.verdict === list.verdict);
+        const count = btn.querySelector('.verdict-count');
+        if (count && page) count.textContent = formatCount(btn.dataset.verdict === 'kept' ? page.kept : page.dropped);
+    });
+    document.querySelectorAll('#filter-result-type-chips .chip').forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.type === list.type);
+    });
+    document.getElementById('filter-result-note').textContent = filterPanel.loading ? 'Re-evaluating…' : 'Follows the rules as you type';
+
+    const listEl = document.getElementById('filter-result-list');
+    const range = document.getElementById('filter-result-range');
+    const pageEl = document.getElementById('filter-result-page');
+    const prev = document.getElementById('filter-result-prev');
+    const next = document.getElementById('filter-result-next');
+
+    if (!page) {
+        listEl.innerHTML = '<div class="px-3 py-6 text-center text-sm text-gray-400">Loading…</div>';
+        range.textContent = '';
+        pageEl.textContent = '';
+        prev.disabled = next.disabled = true;
+        return;
+    }
+
+    if (!page.items.length) {
+        const narrowed = list.q || list.type;
+        const what = list.verdict === 'all' ? '' : list.verdict + ' ';
+        const text = narrowed
+            ? `No ${what}stream matches the search`
+            : (list.verdict === 'kept' ? 'Nothing survives these rules.' : `No ${what}streams`);
+        listEl.innerHTML = `<div class="px-3 py-6 text-center text-sm ${!narrowed && list.verdict === 'kept' ? 'text-orange-300' : 'text-gray-400'}">${text}</div>`;
+    } else {
+        listEl.innerHTML = page.items.map(renderFilterVerdictRow).join('');
+        listEl.scrollTop = 0;
+    }
+
+    const pages = Math.max(1, Math.ceil(page.total / page.size));
+    const first = page.total ? (page.page - 1) * page.size + 1 : 0;
+    const last = Math.min(page.page * page.size, page.total);
+    range.textContent = page.total ? `${formatCount(first)}–${formatCount(last)} of ${formatCount(page.total)} streams` : 'No streams';
+    pageEl.textContent = `page ${page.page} of ${pages}`;
+    prev.disabled = page.page <= 1;
+    next.disabled = page.page >= pages;
+}
+
+/**
+ * One row of the result browser: name, group, type and what settled it. The
+ * badge names the deciding rule so a pattern's reach is visible per stream,
+ * with the rule itself in the tooltip.
+ * @param {Object} v - a verdict from the preview
+ * @returns {string}
+ */
+function renderFilterVerdictRow(v) {
+    const rules = (filterPanel.report && filterPanel.report.rules) || [];
+    const rule = v.rule ? rules[v.rule - 1] : null;
+    const stageText = {
+        rule: `rule ${v.rule}`,
+        default: 'default',
+        group: 'group filter',
+        type: 'type gate',
+        pattern: 'name/URL pattern',
+    }[v.stage] || v.stage;
+    const stageTitle = {
+        default: 'No rule matched; the default applied',
+        group: 'Removed by the group picker or group pattern',
+        type: 'Its content type is not imported',
+        pattern: "Removed by the type's include/exclude patterns",
+    };
+    const title = rule
+        ? `${rule.action === 'exclude' ? 'Drop' : 'Keep'} · ${rule.field} ~ ${rule.pattern}${rule.note ? ' — ' + rule.note : ''}`
+        : (stageTitle[v.stage] || '');
+    const group = v.group ? escapeHtml(v.group) : '<span class="italic">(no group)</span>';
+
+    return `
+        <div class="verdict-row">
+            <span class="type-dot ${FILTER_TYPE_DOT[v.type] || 'bg-gray-600'}" title="${escapeAttr(FILTER_TYPE_LABEL[v.type] || v.type || '')}"></span>
+            <span class="flex-1 min-w-0">
+                <span class="block truncate" title="${escapeAttr(v.name)}">${escapeHtml(v.name)}</span>
+                <span class="block text-xs text-gray-500 truncate" title="${escapeAttr(v.group)}">${group}</span>
+            </span>
+            <span class="verdict-badge ${v.kept ? 'kept' : 'dropped'}" title="${escapeAttr(title)}">${v.kept ? 'Kept' : 'Dropped'} · ${escapeHtml(stageText)}</span>
+        </div>`;
 }

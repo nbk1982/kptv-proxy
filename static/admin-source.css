@@ -248,6 +248,22 @@
         @apply opacity-70;
     }
 
+    .verdict-row {
+        @apply flex items-center gap-3 px-3 py-1.5 text-sm hover:bg-kptv-gray;
+    }
+
+    .verdict-badge {
+        @apply text-xs px-1.5 py-0.5 rounded border whitespace-nowrap flex-shrink-0;
+    }
+
+    .verdict-badge.kept {
+        @apply border-green-700 text-green-300;
+    }
+
+    .verdict-badge.dropped {
+        @apply border-red-800 text-red-300;
+    }
+
     .spinner-sm {
         @apply inline-block border-2 border-white/30 border-t-white rounded-full w-3.5 h-3.5 flex-shrink-0;
         animation: spin 1s linear infinite;

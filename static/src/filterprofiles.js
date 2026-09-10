@@ -86,7 +86,7 @@ function renderFilterProfiles() {
 
 /** Wires the profile modal once at startup. */
 function initFilterProfiles() {
-    profileEditor = createRuleEditor('profile-rules', { onChange: () => scheduleProfilePreview() });
+    profileEditor = createRuleEditor('profile-rules', { onChange: () => scheduleProfilePreview(), onInput: () => scheduleProfilePreview() });
 
     document.getElementById('add-filter-profile-btn').addEventListener('click', () => showProfileModal());
     document.getElementById('save-profile-btn').addEventListener('click', () => saveProfile());

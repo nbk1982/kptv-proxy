@@ -308,8 +308,12 @@ func resolveContentType(stream *types.Stream, filter *CompiledFilter, subjects [
 // Options tunes a pass. RuleStats makes the walk continue past the rule that
 // decided a stream so the report can say how many streams every later rule
 // would have matched; the import path leaves it off and short-circuits.
+// Verdicts records every stream's outcome in Report.Verdicts for the preview's
+// result browser; the import path leaves it off since a catalog can run to
+// hundreds of thousands of entries.
 type Options struct {
 	RuleStats bool
+	Verdicts  bool
 }
 
 // Apply runs a source's filters over its raw catalog. It returns the streams
@@ -332,10 +336,16 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Con
 	// the per-stream pattern work
 	if !source.HasContentFilters() {
 		logger.Debug("{filter - Apply} No filters configured for source %s, keeping %d streams\n", source.Name, len(streams))
+		if opts.Verdicts {
+			report.Verdicts = make([]Verdict, 0, len(streams))
+		}
 		for _, stream := range streams {
 			group := GroupOf(stream)
 			stream.ContentType = utils.ContentTypeOfStream(stream)
 			report.observe(group, config.GroupKey(group), stream.ContentType, stream.Name, true)
+			if opts.Verdicts {
+				report.Verdicts = append(report.Verdicts, Verdict{Name: stream.Name, Group: group, Type: stream.ContentType, Kept: true, Stage: StageDefault})
+			}
 		}
 		report.finish()
 		return streams, report
@@ -345,6 +355,9 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Con
 	filter := filterManager.GetOrCreateFilter(source, cfg)
 	report.startRules(filter, opts.RuleStats)
 	kept := make([]*types.Stream, 0, len(streams))
+	if opts.Verdicts {
+		report.Verdicts = make([]Verdict, 0, len(streams))
+	}
 
 	for _, stream := range streams {
 		group := GroupOf(stream)
@@ -353,13 +366,29 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Con
 		contentType := resolveContentType(stream, filter, subjects, groupKey)
 		stream.ContentType = contentType
 
-		keep := report.observeRules(filter, stream, group, opts.RuleStats) &&
-			filter.passesGroupFilter(group, groupKey) &&
-			filter.importsType(contentType) &&
-			shouldIncludeStream(stream, filter, contentType, subjects)
+		// the rules settle a stream first; the later stages can only remove
+		// what the rules let through, and the verdict names whichever did
+		keep, decidedBy := report.observeRules(filter, stream, group, opts.RuleStats)
+		stage := StageDefault
+		if decidedBy >= 0 {
+			stage = StageRule
+		}
+		if keep {
+			switch {
+			case !filter.passesGroupFilter(group, groupKey):
+				keep, stage = false, StageGroup
+			case !filter.importsType(contentType):
+				keep, stage = false, StageType
+			case !shouldIncludeStream(stream, filter, contentType, subjects):
+				keep, stage = false, StagePattern
+			}
+		}
 		logger.Debug("{filter - Apply} Stream: %s, Group: %s, Type: %s, Include: %v\n", stream.Name, group, contentType, keep)
 
 		report.observe(group, groupKey, contentType, stream.Name, keep)
+		if opts.Verdicts {
+			report.Verdicts = append(report.Verdicts, Verdict{Name: stream.Name, Group: group, Type: contentType, Kept: keep, Stage: stage, Rule: decidedBy + 1})
+		}
 		if keep {
 			kept = append(kept, stream)
 		}

@@ -208,8 +208,9 @@ func (sp *StreamProxy) ImportStatus() ImportStatus {
 // draft profile stands in for the stored one so an unsaved profile edit can be
 // tried out. The returned cached flag says whether the raw catalog was already
 // in memory, so the UI can tell a sub-second re-evaluation from a full
-// download.
-func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConfig, draftProfile *config.FilterProfile, force bool) (report *filter.Report, cached bool, err error) {
+// download. With verdicts, the report also carries every stream's outcome for
+// the result browser.
+func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConfig, draftProfile *config.FilterProfile, force, verdicts bool) (report *filter.Report, cached bool, err error) {
 	// previews are serialized end to end: the slot's streams are shared and
 	// Apply rewrites their type stamps, so two passes must never interleave
 	if err := sp.preview.acquire(ctx); err != nil {
@@ -250,7 +251,7 @@ func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConf
 		cfg.FilterProfiles = profiles
 	}
 
-	_, report = filter.Apply(streams, src, &cfg, filter.NewFilterManager(), filter.Options{RuleStats: true})
+	_, report = filter.Apply(streams, src, &cfg, filter.NewFilterManager(), filter.Options{RuleStats: true, Verdicts: verdicts})
 	return report, cached, nil
 }
 
