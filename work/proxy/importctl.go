@@ -204,10 +204,12 @@ func (sp *StreamProxy) ImportStatus() ImportStatus {
 
 // PreviewSource fetches a source with a draft configuration and reports what
 // its rules would keep, without touching the live catalog. A throwaway filter
-// manager keeps the draft's compiled rules out of the import's cache. The
-// returned cached flag says whether the raw catalog was already in memory, so
-// the UI can tell a sub-second re-evaluation from a full download.
-func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConfig, force bool) (report *filter.Report, cached bool, err error) {
+// manager keeps the draft's compiled rules out of the import's cache, and a
+// draft profile stands in for the stored one so an unsaved profile edit can be
+// tried out. The returned cached flag says whether the raw catalog was already
+// in memory, so the UI can tell a sub-second re-evaluation from a full
+// download.
+func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConfig, draftProfile *config.FilterProfile, force bool) (report *filter.Report, cached bool, err error) {
 	// previews are serialized end to end: the slot's streams are shared and
 	// Apply rewrites their type stamps, so two passes must never interleave
 	if err := sp.preview.acquire(ctx); err != nil {
@@ -234,7 +236,21 @@ func (sp *StreamProxy) PreviewSource(ctx context.Context, src *config.SourceConf
 		sp.preview.put(key, streams)
 	}
 
-	_, report = filter.Apply(streams, src, filter.NewFilterManager())
+	// resolve the source's profile against a config carrying the draft, so the
+	// preview reflects edits the operator has not saved yet
+	cfg := *sp.Config
+	if draftProfile != nil {
+		profiles := make([]config.FilterProfile, 0, len(cfg.FilterProfiles)+1)
+		profiles = append(profiles, *draftProfile)
+		for _, existing := range cfg.FilterProfiles {
+			if existing.Name != draftProfile.Name {
+				profiles = append(profiles, existing)
+			}
+		}
+		cfg.FilterProfiles = profiles
+	}
+
+	_, report = filter.Apply(streams, src, &cfg, filter.NewFilterManager(), filter.Options{RuleStats: true})
 	return report, cached, nil
 }
 

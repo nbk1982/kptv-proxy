@@ -40,6 +40,9 @@ type Source struct {
 	GroupFilterRegex   string
 	ImportTypes        string
 	GroupTypeOverrides string
+	FilterProfile      string
+	FilterRules        string
+	FilterDefault      string
 }
 
 // sourceColumns is the column list every kp_sources query reads, in Scan order.
@@ -50,7 +53,8 @@ const sourceColumns = `id, name, uri, uname, pword, sort_order, max_cnx,
 		       series_exc_regex, vod_inc_regex, vod_exc_regex,
 		       live_cat_regex, vod_cat_regex, series_cat_regex,
 		       group_filter_mode, group_filter_list, group_filter_regex,
-		       import_types, group_type_overrides`
+		       import_types, group_type_overrides,
+		       filter_profile, filter_rules, filter_default`
 
 // GetAllSources returns every source row ordered by sort_order ascending.
 func GetAllSources() ([]Source, error) {
@@ -91,8 +95,9 @@ func InsertSource(s Source) (int64, error) {
 			 series_inc_regex, series_exc_regex, vod_inc_regex, vod_exc_regex,
 			 live_cat_regex, vod_cat_regex, series_cat_regex,
 			 group_filter_mode, group_filter_list, group_filter_regex,
-			 import_types, group_type_overrides)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 import_types, group_type_overrides,
+			 filter_profile, filter_rules, filter_default)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
 		s.MinDataSize, s.UserAgent, s.ReqOrigin, s.ReqReferer,
@@ -101,6 +106,7 @@ func InsertSource(s Source) (int64, error) {
 		s.SeriesCatRegex,
 		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
 		s.ImportTypes, s.GroupTypeOverrides,
+		s.FilterProfile, s.FilterRules, s.FilterDefault,
 	)
 	if err != nil {
 		logger.Error("{db/sources - InsertSource} %v", err)
@@ -120,7 +126,8 @@ func UpdateSource(s Source) error {
 			series_exc_regex=?, vod_inc_regex=?, vod_exc_regex=?,
 			live_cat_regex=?, vod_cat_regex=?, series_cat_regex=?,
 			group_filter_mode=?, group_filter_list=?, group_filter_regex=?,
-			import_types=?, group_type_overrides=?
+			import_types=?, group_type_overrides=?,
+			filter_profile=?, filter_rules=?, filter_default=?
 		WHERE id=?`,
 		s.Name, s.URI, s.Username, s.Password, s.SortOrder, s.MaxCnx,
 		s.MaxStreamTo, s.RetryDelay, s.MaxRetries, s.MaxFailures,
@@ -129,7 +136,8 @@ func UpdateSource(s Source) error {
 		s.VODIncRegex, s.VODExcRegex, s.LiveCatRegex, s.VODCatRegex,
 		s.SeriesCatRegex,
 		s.GroupFilterMode, s.GroupFilterList, s.GroupFilterRegex,
-		s.ImportTypes, s.GroupTypeOverrides, s.ID,
+		s.ImportTypes, s.GroupTypeOverrides,
+		s.FilterProfile, s.FilterRules, s.FilterDefault, s.ID,
 	)
 	if err != nil {
 		logger.Error("{db/sources - UpdateSource} id=%d: %v", s.ID, err)
@@ -176,5 +184,6 @@ func sourceFields(s *Source) []any {
 		&s.LiveCatRegex, &s.VODCatRegex, &s.SeriesCatRegex,
 		&s.GroupFilterMode, &s.GroupFilterList, &s.GroupFilterRegex,
 		&s.ImportTypes, &s.GroupTypeOverrides,
+		&s.FilterProfile, &s.FilterRules, &s.FilterDefault,
 	}
 }

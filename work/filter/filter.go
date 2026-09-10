@@ -24,6 +24,8 @@ var groupAttributeKeys = []string{"group-title", "tvg-group"}
 // patterns, importer heuristics), the content type gate, and finally that
 // type's include/exclude patterns.
 type CompiledFilter struct {
+	Rules       []compiledRule                 // ordered include/exclude rules; the first match decides
+	RuleDefault string                         // verdict for a stream no rule matched
 	GroupMode   string                         // config.GroupFilterInclude, config.GroupFilterExclude, or "" when off
 	GroupSet    map[string]struct{}            // config.GroupKey of every listed group
 	GroupRegex  *regexp.Regexp                 // optional pattern on the group label, ORed with GroupSet
@@ -71,17 +73,50 @@ func compilePattern(field, pattern string) *regexp.Regexp {
 	return compiled
 }
 
+// ruleSet is the ordered rule list a source is filtered by once its profile
+// has been resolved, with the origin of each rule kept for the preview.
+type ruleSet struct {
+	rules   []config.FilterRule
+	origins []string
+	def     string
+}
+
+// resolveRules returns the source's effective rules. A nil config means no
+// profiles exist, so only the source's own rules apply.
+func resolveRules(source *config.SourceConfig, cfg *config.Config) ruleSet {
+	if cfg == nil {
+		origins := make([]string, len(source.FilterRules))
+		for i := range origins {
+			origins[i] = "source"
+		}
+		def := source.FilterDefault
+		if def == "" {
+			def = config.FilterDefaultKeep
+		}
+		return ruleSet{rules: source.FilterRules, origins: origins, def: def}
+	}
+	rules, origins := cfg.EffectiveRules(source)
+	return ruleSet{rules: rules, origins: origins, def: cfg.EffectiveDefault(source)}
+}
+
 // filterSignature serializes every rule of a source so a cached filter can be
 // recognised as stale. The override map is sorted so two equal maps always
 // produce the same string.
-func filterSignature(source *config.SourceConfig) string {
+func filterSignature(source *config.SourceConfig, rules ruleSet) string {
 	overrides := make([]string, 0, len(source.GroupTypeOverrides))
 	for group, contentType := range source.GroupTypeOverrides {
 		overrides = append(overrides, group+"="+contentType)
 	}
 	sort.Strings(overrides)
 
+	ruleParts := make([]string, 0, len(rules.rules)+1)
+	ruleParts = append(ruleParts, rules.def)
+	for i, rule := range rules.rules {
+		ruleParts = append(ruleParts, rules.origins[i]+"|"+rule.Field+"|"+rule.Action+"|"+rule.Pattern)
+	}
+
 	return strings.Join([]string{
+		strings.Join(ruleParts, "\x02"),
 		source.LiveCategoryRegex,
 		source.VODCategoryRegex,
 		source.SeriesCategoryRegex,
@@ -99,8 +134,10 @@ func filterSignature(source *config.SourceConfig) string {
 	}, "\x00")
 }
 
-// GetOrCreateFilter gets or creates a compiled filter for a source
-func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *CompiledFilter {
+// GetOrCreateFilter gets or creates a compiled filter for a source. The config
+// supplies the shared rule profiles a source may name; it may be nil when
+// there are none.
+func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig, cfg *config.Config) *CompiledFilter {
 
 	// et a filter lock
 	fm.mu.Lock()
@@ -110,7 +147,8 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 	key := source.URL
 
 	// the cache is keyed on URL, so a rule edit alone would otherwise keep serving the stale filter
-	signature := filterSignature(source)
+	rules := resolveRules(source, cfg)
+	signature := filterSignature(source, rules)
 
 	// if it already exists and nothing changed
 	if filter, exists := fm.filters[key]; exists {
@@ -124,6 +162,8 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 	// setup the compiled filter (an invalid pattern is logged and skipped)
 	filter := &CompiledFilter{
 		signature:      signature,
+		Rules:          compileRules(rules.rules, rules.origins),
+		RuleDefault:    rules.def,
 		GroupMode:      source.GroupFilterMode,
 		GroupRegex:     compilePattern("GroupFilterRegex", source.GroupFilterRegex),
 		LiveCategory:   compilePattern("LiveCategoryRegex", source.LiveCategoryRegex),
@@ -265,18 +305,30 @@ func resolveContentType(stream *types.Stream, filter *CompiledFilter, subjects [
 	return utils.ContentTypeOfStream(stream)
 }
 
-// Apply runs a source's rules over its raw catalog. It returns the streams that
-// survive, each stamped with the content type it was filtered as, and a Report
-// of what every group contributed. The report is what the import persists as
-// the source's inventory and what the admin preview shows before a save.
+// Options tunes a pass. RuleStats makes the walk continue past the rule that
+// decided a stream so the report can say how many streams every later rule
+// would have matched; the import path leaves it off and short-circuits.
+type Options struct {
+	RuleStats bool
+}
+
+// Apply runs a source's filters over its raw catalog. It returns the streams
+// that survive, each stamped with the content type it was filtered as, and a
+// Report of what every group and rule contributed. The report is what the
+// import persists as the source's inventory and what the admin preview shows
+// before a save. The config supplies the shared rule profiles a source may
+// name and may be nil when there are none.
 //
-// The type stamp matters downstream: utils.ContentTypeOfStream returns an
-// explicit type verbatim, so playlist output, XC catalogs and playback routing
-// all serve the stream as the same type it was filtered as.
-func Apply(streams []*types.Stream, source *config.SourceConfig, filterManager *FilterManager) ([]*types.Stream, *Report) {
+// Each stage can only narrow, and they run in this order: the ordered rule
+// list, the group filter, the content type gate, then that type's legacy
+// include and exclude patterns. Classification happens first regardless,
+// because the type stamp matters downstream: utils.ContentTypeOfStream returns
+// an explicit type verbatim, so playlist output, XC catalogs and playback
+// routing all serve the stream as the same type it was filtered as.
+func Apply(streams []*types.Stream, source *config.SourceConfig, cfg *config.Config, filterManager *FilterManager, opts Options) ([]*types.Stream, *Report) {
 	report := newReport()
 
-	// a source without rules still needs the pass for its inventory, but not
+	// a source without filters still needs the pass for its inventory, but not
 	// the per-stream pattern work
 	if !source.HasContentFilters() {
 		logger.Debug("{filter - Apply} No filters configured for source %s, keeping %d streams\n", source.Name, len(streams))
@@ -290,7 +342,8 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, filterManager *
 	}
 
 	logger.Debug("{filter - Apply} Applying filters to %d streams from source %s\n", len(streams), source.Name)
-	filter := filterManager.GetOrCreateFilter(source)
+	filter := filterManager.GetOrCreateFilter(source, cfg)
+	report.startRules(filter, opts.RuleStats)
 	kept := make([]*types.Stream, 0, len(streams))
 
 	for _, stream := range streams {
@@ -300,7 +353,8 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, filterManager *
 		contentType := resolveContentType(stream, filter, subjects, groupKey)
 		stream.ContentType = contentType
 
-		keep := filter.passesGroupFilter(group, groupKey) &&
+		keep := report.observeRules(filter, stream, group, opts.RuleStats) &&
+			filter.passesGroupFilter(group, groupKey) &&
 			filter.importsType(contentType) &&
 			shouldIncludeStream(stream, filter, contentType, subjects)
 		logger.Debug("{filter - Apply} Stream: %s, Group: %s, Type: %s, Include: %v\n", stream.Name, group, contentType, keep)
@@ -316,10 +370,10 @@ func Apply(streams []*types.Stream, source *config.SourceConfig, filterManager *
 	return kept, report
 }
 
-// FilterStreams applies a source's rules and returns the surviving streams. It
-// is Apply without the report, for callers that only need the result.
-func FilterStreams(streams []*types.Stream, source *config.SourceConfig, filterManager *FilterManager) []*types.Stream {
-	kept, _ := Apply(streams, source, filterManager)
+// FilterStreams applies a source's filters and returns the surviving streams.
+// It is Apply without the report, for callers that only need the result.
+func FilterStreams(streams []*types.Stream, source *config.SourceConfig, cfg *config.Config, filterManager *FilterManager) []*types.Stream {
+	kept, _ := Apply(streams, source, cfg, filterManager, Options{})
 	return kept
 }
 

@@ -68,6 +68,14 @@ func nonNilList(v []string) []string {
 	return v
 }
 
+// nonNilRules returns an empty slice for nil so the field serialises as [].
+func nonNilRules(v []config.FilterRule) []config.FilterRule {
+	if v == nil {
+		return []config.FilterRule{}
+	}
+	return v
+}
+
 // nonNilMap returns an empty map for nil so the field serialises as {}.
 func nonNilMap(m map[string]string) map[string]string {
 	if m == nil {
@@ -133,8 +141,9 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 		}
 
 		var req struct {
-			Source json.RawMessage `json:"source"`
-			Force  bool            `json:"force"`
+			Source  json.RawMessage       `json:"source"`
+			Profile *config.FilterProfile `json:"profile"`
+			Force   bool                  `json:"force"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -161,11 +170,20 @@ func handlePreviewSource(sp *proxy.StreamProxy) http.HandlerFunc {
 			return
 		}
 
+		// an unsaved profile edit is previewed by sending it along; the source
+		// still names it, so nothing else about the resolution changes
+		if req.Profile != nil {
+			if err := req.Profile.Normalize(); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
 		defer cancel()
 
 		started := time.Now()
-		report, cached, err := sp.PreviewSource(ctx, &src, req.Force)
+		report, cached, err := sp.PreviewSource(ctx, &src, req.Profile, req.Force)
 		if err != nil {
 			// the client navigated away or the wait for another preview to
 			// finish outlasted this request; there is nothing to report

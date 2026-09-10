@@ -33,34 +33,37 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 
 		// Marshal sources with duration fields as strings.
 		type sourceOut struct {
-			Name                   string            `json:"name"`
-			URL                    string            `json:"url"`
-			Order                  int               `json:"order"`
-			MaxConnections         int               `json:"maxConnections"`
-			MaxStreamTimeout       string            `json:"maxStreamTimeout"`
-			RetryDelay             string            `json:"retryDelay"`
-			MaxRetries             int               `json:"maxRetries"`
-			MaxFailuresBeforeBlock int               `json:"maxFailuresBeforeBlock"`
-			MinDataSize            int64             `json:"minDataSize"`
-			UserAgent              string            `json:"userAgent"`
-			ReqOrigin              string            `json:"reqOrigin"`
-			ReqReferrer            string            `json:"reqReferrer"`
-			Username               string            `json:"username"`
-			Password               string            `json:"password"`
-			LiveIncludeRegex       string            `json:"liveIncludeRegex"`
-			LiveExcludeRegex       string            `json:"liveExcludeRegex"`
-			SeriesIncludeRegex     string            `json:"seriesIncludeRegex"`
-			SeriesExcludeRegex     string            `json:"seriesExcludeRegex"`
-			VODIncludeRegex        string            `json:"vodIncludeRegex"`
-			VODExcludeRegex        string            `json:"vodExcludeRegex"`
-			LiveCategoryRegex      string            `json:"liveCategoryRegex"`
-			VODCategoryRegex       string            `json:"vodCategoryRegex"`
-			SeriesCategoryRegex    string            `json:"seriesCategoryRegex"`
-			GroupFilterMode        string            `json:"groupFilterMode"`
-			GroupFilterList        []string          `json:"groupFilterList"`
-			GroupFilterRegex       string            `json:"groupFilterRegex"`
-			ImportTypes            []string          `json:"importTypes"`
-			GroupTypeOverrides     map[string]string `json:"groupTypeOverrides"`
+			Name                   string              `json:"name"`
+			URL                    string              `json:"url"`
+			Order                  int                 `json:"order"`
+			MaxConnections         int                 `json:"maxConnections"`
+			MaxStreamTimeout       string              `json:"maxStreamTimeout"`
+			RetryDelay             string              `json:"retryDelay"`
+			MaxRetries             int                 `json:"maxRetries"`
+			MaxFailuresBeforeBlock int                 `json:"maxFailuresBeforeBlock"`
+			MinDataSize            int64               `json:"minDataSize"`
+			UserAgent              string              `json:"userAgent"`
+			ReqOrigin              string              `json:"reqOrigin"`
+			ReqReferrer            string              `json:"reqReferrer"`
+			Username               string              `json:"username"`
+			Password               string              `json:"password"`
+			LiveIncludeRegex       string              `json:"liveIncludeRegex"`
+			LiveExcludeRegex       string              `json:"liveExcludeRegex"`
+			SeriesIncludeRegex     string              `json:"seriesIncludeRegex"`
+			SeriesExcludeRegex     string              `json:"seriesExcludeRegex"`
+			VODIncludeRegex        string              `json:"vodIncludeRegex"`
+			VODExcludeRegex        string              `json:"vodExcludeRegex"`
+			LiveCategoryRegex      string              `json:"liveCategoryRegex"`
+			VODCategoryRegex       string              `json:"vodCategoryRegex"`
+			SeriesCategoryRegex    string              `json:"seriesCategoryRegex"`
+			GroupFilterMode        string              `json:"groupFilterMode"`
+			GroupFilterList        []string            `json:"groupFilterList"`
+			GroupFilterRegex       string              `json:"groupFilterRegex"`
+			ImportTypes            []string            `json:"importTypes"`
+			GroupTypeOverrides     map[string]string   `json:"groupTypeOverrides"`
+			FilterProfile          string              `json:"filterProfile"`
+			FilterRules            []config.FilterRule `json:"filterRules"`
+			FilterDefault          string              `json:"filterDefault"`
 		}
 		sources := make([]sourceOut, len(cfg.Sources))
 		for i := range cfg.Sources {
@@ -83,6 +86,9 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 				GroupFilterMode:     s.GroupFilterMode, GroupFilterList: nonNilList(s.GroupFilterList),
 				GroupFilterRegex: s.GroupFilterRegex, ImportTypes: nonNilList(s.ImportTypes),
 				GroupTypeOverrides: nonNilMap(s.GroupTypeOverrides),
+				FilterProfile:      s.FilterProfile,
+				FilterRules:        nonNilRules(s.FilterRules),
+				FilterDefault:      s.FilterDefault,
 			}
 		}
 
@@ -188,6 +194,25 @@ func handleSetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 			addLogEntry("error", fmt.Sprintf("Rejected config: %v", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		// a source may only name a rule set that exists, or its filters would
+		// silently be the ones it carries itself
+		for i := range incoming.Sources {
+			src := &incoming.Sources[i]
+			if src.FilterProfile == "" || sp.Config.FilterProfileByName(src.FilterProfile) != nil {
+				continue
+			}
+			msg := fmt.Sprintf("source %q names filter profile %q, which does not exist", src.Name, src.FilterProfile)
+			addLogEntry("error", "Rejected config: "+msg)
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+
+		// The UI posts the whole document but omits the shared rule sets, which
+		// have their own endpoints; keep what is stored rather than dropping it
+		if incoming.FilterProfiles == nil {
+			incoming.FilterProfiles = sp.Config.FilterProfiles
 		}
 
 		// Ensure FFmpeg slices are never nil in the persisted config.

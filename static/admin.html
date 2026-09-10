@@ -483,6 +483,9 @@
                         <button
                             class="srctype-tab-btn px-4 py-3 border-b-2 border-transparent hover:text-gray-300 hover:border-gray-300"
                             data-tab="1">Local Sources</button>
+                        <button
+                            class="srctype-tab-btn px-4 py-3 border-b-2 border-transparent hover:text-gray-300 hover:border-gray-300"
+                            data-tab="2">Filter Profiles</button>
                     </nav>
                 </div>
                 <div class="srctype-tab-content">
@@ -534,6 +537,20 @@
                             </button>
                         </div>
                         <div id="local-sources-container"></div>
+                    </div>
+                    <div>
+                        <div class="mb-4">
+                            <button
+                                class="px-4 py-2 bg-kptv-blue hover:bg-kptv-blue-light rounded transition-colors flex items-center space-x-2"
+                                id="add-filter-profile-btn">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4">
+                                    </path>
+                                </svg>
+                                <span>New Filter Profile</span>
+                            </button>
+                        </div>
+                        <div id="filter-profiles-container"></div>
                     </div>
                 </div>
             </div>
@@ -724,6 +741,59 @@
     </div>
 
     <!-- MODALS -->
+    <!-- filter profile modal -->
+    <div id="profile-modal" class="modal">
+        <div class="modal-content bg-kptv-gray rounded border border-kptv-border w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
+            <div class="border-b border-kptv-border bg-kptv-gray-light px-4 py-3 flex justify-between items-center sticky top-0">
+                <h2 class="text-xl font-semibold" id="profile-modal-title">New Filter Profile</h2>
+                <button class="text-gray-400 hover:text-white" id="close-profile-modal">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-4">
+                <div class="text-xs text-gray-400 mb-4">A profile is a rule set of its own. Attach it to as many sources as you like from each source's Content Filtering tab; editing it here changes them all, and each source can still add its own rules after these.</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1" for="profile-name">Name</label>
+                        <input class="filter-input" type="text" id="profile-name" placeholder="Live TV only" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">If no rule matches</label>
+                        <div id="profile-default" class="seg" role="group" aria-label="Verdict when no rule matches">
+                            <button type="button" class="seg-btn active" data-default="keep">Keep the stream</button>
+                            <button type="button" class="seg-btn" data-default="drop">Drop the stream</button>
+                        </div>
+                        <div id="profile-default-hint" class="text-xs mt-1"></div>
+                    </div>
+                </div>
+                <div class="rounded border border-kptv-border overflow-hidden mb-4">
+                    <div id="profile-rules" class="divide-y divide-kptv-border max-h-80 overflow-y-auto"></div>
+                    <div class="px-3 py-2 bg-kptv-gray-light border-t border-kptv-border">
+                        <button type="button" id="profile-add-rule-btn" class="chip">+ Add rule</button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 p-3 rounded border border-kptv-border bg-kptv-gray-light">
+                    <select id="profile-test-source" class="bg-kptv-gray border border-kptv-border rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-kptv-blue">
+                        <option value="">Test against…</option>
+                    </select>
+                    <button type="button" id="profile-preview-btn" class="chip flex items-center gap-1">
+                        <span id="profile-preview-spinner" class="spinner-sm" hidden></span>Preview
+                    </button>
+                    <span id="profile-preview-summary" class="text-sm text-gray-400 flex-1 min-w-[12rem]">Pick a source to see what these rules would keep in its catalog.</span>
+                </div>
+            </div>
+            <div class="border-t border-kptv-border bg-kptv-gray-light px-4 py-3 flex justify-end gap-2">
+                <button class="px-4 py-2 bg-kptv-gray-light border border-kptv-border hover:bg-kptv-border rounded transition-colors"
+                    id="cancel-profile-btn" type="button">Cancel</button>
+                <button class="px-4 py-2 bg-kptv-blue hover:bg-kptv-blue-light rounded transition-colors"
+                    id="save-profile-btn" type="button">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- source modal -->
     <div id="source-modal" class="modal">
         <div
@@ -851,11 +921,40 @@
                                 </div>
                             </div>
 
+                            <!-- rules: the primary control -->
+                            <section class="mb-5">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                    <h3 class="text-sm font-semibold">Rules</h3>
+                                    <div class="flex items-center gap-2 text-xs">
+                                        <label class="text-gray-400" for="source-filter-profile">Profile</label>
+                                        <select id="source-filter-profile" class="bg-kptv-gray-light border border-kptv-border rounded px-2 py-1 text-gray-100 focus:outline-none focus:border-kptv-blue">
+                                            <option value="">No profile</option>
+                                        </select>
+                                        <a href="#" id="manage-profiles-link" class="text-kptv-blue hover:underline">Manage</a>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-400 mb-2">Rules are evaluated in order and the first one that matches decides, so put the exceptions above the broad rules. Patterns are regular expressions, matched case-insensitively against the value you pick: the provider's group label, the stream name, or its URL.</div>
+                                <div class="rounded border border-kptv-border overflow-hidden">
+                                    <div id="source-rules" class="divide-y divide-kptv-border max-h-80 overflow-y-auto"></div>
+                                    <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-kptv-gray-light border-t border-kptv-border">
+                                        <button type="button" id="source-add-rule-btn" class="chip">+ Add rule</button>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <span class="text-gray-400">If no rule matches</span>
+                                            <div id="source-filter-default" class="seg" role="group" aria-label="Verdict when no rule matches">
+                                                <button type="button" class="seg-btn active" data-default="keep">Keep</button>
+                                                <button type="button" class="seg-btn" data-default="drop">Drop</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="source-filter-default-hint" class="text-xs text-gray-400 mt-1"></div>
+                            </section>
+
                             <!-- content types -->
                             <section class="mb-5">
                                 <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                                     <h3 class="text-sm font-semibold">Content types</h3>
-                                    <span class="text-xs text-gray-400">Switch a type off to drop everything classified as it</span>
+                                    <span class="text-xs text-gray-400">Only useful when the provider's own classification is right — check the counts</span>
                                 </div>
                                 <div id="filter-type-toggles" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     <button type="button" class="type-toggle on" data-type="live" aria-pressed="true">
@@ -881,6 +980,7 @@
                                     </div>
                                 </div>
                                 <div id="filter-group-mode-hint" class="text-xs text-gray-400 mb-2">Every group is imported. Tick a group to keep only what you choose.</div>
+                                <div class="text-xs text-gray-400 mb-2">This list is also where you find the labels to write rules against: use the buttons on a row to turn that group into a rule.</div>
                                 <div class="rounded border border-kptv-border overflow-hidden">
                                     <div class="flex flex-wrap items-center gap-2 p-2 bg-kptv-gray-light border-b border-kptv-border">
                                         <input type="search" id="filter-group-search" placeholder="Search groups…" autocomplete="off"

@@ -21,6 +21,7 @@ const FILTER_REGEX_IDS = [
 /** Panel state, replaced every time the source modal opens. */
 let filterPanel = null;
 let filterPreviewTimer = null;
+let sourceRuleEditor = null;
 
 /**
  * Mirrors the server's group key: lowercased, trimmed, whitespace collapsed,
@@ -46,6 +47,7 @@ function newFilterPanelState() {
         search: '',
         typeChip: '',
         report: null,            // last preview response
+        profileRules: [],        // rules inherited from the selected profile
         inventoryAt: null,       // when the inventory shown was recorded
         loading: false,
         pending: false,          // a rule changed while a preview was in flight
@@ -56,6 +58,25 @@ function newFilterPanelState() {
  * Wires the panel's controls once at startup.
  */
 function initFilterPanel() {
+    sourceRuleEditor = createRuleEditor('source-rules', { onChange: () => { renderFilterDefaultHint(); scheduleFilterPreview(); } });
+    document.getElementById('source-rules').addEventListener('change', () => renderFilterDefaultHint());
+
+    // a new rule always keeps: guessing from the default surprises the operator
+    document.getElementById('source-add-rule-btn').addEventListener('click', () => {
+        sourceRuleEditor.addRule({ field: 'group', action: 'include' });
+    });
+    document.getElementById('source-filter-default').addEventListener('click', (e) => {
+        const btn = e.target.closest('.seg-btn');
+        if (!btn) return;
+        document.querySelectorAll('#source-filter-default .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+        renderFilterDefaultHint();
+        scheduleFilterPreview();
+    });
+    document.getElementById('source-filter-profile').addEventListener('change', () => {
+        applySourceProfile();
+        scheduleFilterPreview();
+    });
+
     document.getElementById('filter-preview-btn').addEventListener('click', () => runFilterPreview(false));
     document.getElementById('filter-refetch-btn').addEventListener('click', () => runFilterPreview(true));
 
@@ -127,8 +148,16 @@ function initFilterPanel() {
         }
     });
     list.addEventListener('click', (e) => {
+        if (!filterPanel) return;
+        const ruleBtn = e.target.closest('.group-rule');
+        if (ruleBtn) {
+            const row = ruleBtn.closest('.group-row');
+            const group = filterPanel.groups.find(g => g.key === row.dataset.key);
+            addRuleForGroup(group ? group.name : row.dataset.key, ruleBtn.dataset.action);
+            return;
+        }
         // the whole row toggles, except its own controls
-        if (!filterPanel || e.target.closest('input, select, button')) return;
+        if (e.target.closest('input, select, button')) return;
         const row = e.target.closest('.group-row');
         if (!row) return;
         const key = row.dataset.key;
@@ -140,6 +169,70 @@ function initFilterPanel() {
         input.addEventListener('input', () => validateRegexInput(input));
         input.addEventListener('change', () => scheduleFilterPreview());
     });
+}
+
+/** @returns {string} the verdict for a stream no rule matched */
+function filterDefaultAction() {
+    const active = document.querySelector('#source-filter-default .seg-btn.active');
+    return active ? active.dataset.default : 'keep';
+}
+
+/**
+ * Appends a rule matching exactly one group label, so a row of the picker can
+ * become a rule without retyping an emoji-laden name.
+ * @param {string} label - the provider's group label
+ * @param {string} action - include or exclude
+ */
+function addRuleForGroup(label, action) {
+    sourceRuleEditor.addRule({
+        field: 'group',
+        action,
+        pattern: label ? `^${escapeRegex(label)}$` : '^$',
+        note: label || '(no group)',
+    });
+    // an include rule only means something when the rest is dropped
+    if (action === 'include' && filterDefaultAction() !== 'drop' && sourceRuleEditor.getRules().length === 1) {
+        document.querySelector('#source-filter-default .seg-btn[data-default="drop"]').click();
+    }
+}
+
+/** Explains what the current default does, in the terms of the rules above. */
+function renderFilterDefaultHint() {
+    const hint = document.getElementById('source-filter-default-hint');
+    if (!hint) return;
+
+    const own = sourceRuleEditor ? sourceRuleEditor.getRules() : [];
+    const inherited = (filterPanel && filterPanel.profileRules) || [];
+    const all = inherited.concat(own);
+    const keeps = all.filter(r => r.action === 'include').length;
+
+    let text = '';
+    let warn = false;
+    if (filterDefaultAction() === 'drop') {
+        warn = keeps === 0;
+        text = warn
+            ? 'Nothing would be imported: dropping by default with no Keep rule leaves nothing.'
+            : 'Only what a Keep rule matches is imported — the rules are an allow list.';
+    } else if (all.length) {
+        text = 'Everything is imported except what a Drop rule matches — the rules are a deny list.';
+    }
+
+    hint.textContent = text;
+    hint.classList.toggle('text-orange-400', warn);
+    hint.classList.toggle('text-gray-400', !warn);
+}
+
+/**
+ * Reflects the selected profile: its rules are shown above the source's own,
+ * read-only, because they are shared with every other source using it.
+ */
+function applySourceProfile() {
+    if (!filterPanel) return;
+    const name = document.getElementById('source-filter-profile').value;
+    const profile = (typeof allFilterProfiles !== 'undefined' ? allFilterProfiles : []).find(p => p.name === name);
+    filterPanel.profileRules = profile ? profile.rules : [];
+    sourceRuleEditor.setProfileRules(name, filterPanel.profileRules);
+    renderFilterDefaultHint();
 }
 
 /**
@@ -177,6 +270,14 @@ function resetFilterPanel(source) {
             filterPanel.types = new Set(source.importTypes);
         }
     }
+
+    renderProfileOptions();
+    document.getElementById('source-filter-profile').value = (source && source.filterProfile) || '';
+    document.querySelectorAll('#source-filter-default .seg-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.default === ((source && source.filterDefault) || 'keep'));
+    });
+    sourceRuleEditor.setRules((source && source.filterRules) || []);
+    applySourceProfile();
 
     document.getElementById('source-group-filter-regex').value = (source && source.groupFilterRegex) || '';
     document.getElementById('filter-group-search').value = '';
@@ -239,7 +340,8 @@ function collectFilterFields() {
     return {
         groupFilterMode: panel.mode,
         groupFilterList: Array.from(panel.selected.values()),
-        groupFilterRegex: document.getElementById('source-group-filter-regex').value.trim(),
+        // not trimmed: whitespace is part of a regular expression
+        groupFilterRegex: document.getElementById('source-group-filter-regex').value,
         importTypes: panel.types.size === FILTER_TYPES.length ? [] : FILTER_TYPES.filter(t => panel.types.has(t)),
         groupTypeOverrides: overrides,
     };
@@ -315,6 +417,7 @@ async function runFilterPreview(force) {
         if (panel !== filterPanel) return;
         panel.report = { ...result.report, cached: result.cached, durationMs: result.durationMs };
         setFilterGroups(result.report.groups || []);
+        sourceRuleEditor.setStats(result.report.rules || []);
         panel.inventoryAt = null;
     } catch (error) {
         if (panel === filterPanel) showNotification('Preview failed: ' + error.message, 'danger');
@@ -456,6 +559,10 @@ function renderFilterGroupRow(g, missing) {
                 <span class="block text-xs text-gray-500 truncate">${sub}</span>
             </span>
             <span class="ml-auto flex items-center gap-2 flex-shrink-0">
+                <span class="flex gap-1">
+                    <button type="button" class="group-rule chip" data-action="include" title="Add a rule keeping this group">+ Keep</button>
+                    <button type="button" class="group-rule chip" data-action="exclude" title="Add a rule dropping this group">+ Drop</button>
+                </span>
                 <select class="group-type text-xs bg-kptv-gray border ${override ? 'border-kptv-blue text-kptv-blue' : 'border-kptv-border text-gray-300'} rounded px-1 py-0.5"
                     data-key="${escapeAttr(g.key)}" title="Content type for this group" ${missing ? 'disabled' : ''}>${options}</select>
                 <span class="text-xs tabular-nums w-24 text-right">${counts}</span>
@@ -488,7 +595,10 @@ function renderFilterSummary() {
         const t = report.byType || {};
         const part = type => `${FILTER_TYPE_LABEL[type]} ${formatCount((t[type] || {}).kept || 0)}/${formatCount((t[type] || {}).total || 0)}`;
         const secs = (report.durationMs / 1000).toFixed(report.durationMs < 10000 ? 1 : 0);
-        sub.textContent = `${FILTER_TYPES.map(part).join(' · ')} · ${report.cached ? 'evaluated from cache' : 'downloaded'} in ${secs}s`;
+        const unmatched = (report.rules || []).length
+            ? ` · ${formatCount(report.defaultDecided)} matched no rule and were ${report.defaultAction === 'drop' ? 'dropped' : 'kept'}`
+            : '';
+        sub.textContent = `${FILTER_TYPES.map(part).join(' · ')}${unmatched} · ${report.cached ? 'evaluated from cache' : 'downloaded'} in ${secs}s`;
         return;
     }
     if (filterPanel.groups.length) {

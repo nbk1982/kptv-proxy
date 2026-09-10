@@ -6,6 +6,7 @@
 function initModals() {
     const modals = [
         { id: 'source-modal', closeId: 'close-source-modal', cancelId: 'cancel-source-btn' },
+        { id: 'profile-modal', closeId: 'close-profile-modal', cancelId: 'cancel-profile-btn' },
         { id: 'epg-modal', closeId: 'close-epg-modal', cancelId: 'cancel-epg-btn' },
         { id: 'stream-selector-modal', closeId: 'close-stream-selector-modal', cancelId: 'cancel-stream-selector-btn' },
         { id: 'xc-account-modal', closeId: 'close-xc-account-modal', cancelId: 'cancel-xc-account-btn' },

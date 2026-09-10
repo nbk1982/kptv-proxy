@@ -144,6 +144,13 @@ function renderFilterBadges(source) {
         badges.push(badge(`Excludes ${formatCount(groups)} group${groups === 1 ? '' : 's'}${pattern}`));
     }
 
+    const rules = (source.filterRules || []).length;
+    if (source.filterProfile) {
+        badges.push(badge(`Profile: ${escapeHtml(source.filterProfile)}`, 'bg-kptv-blue text-white'));
+    }
+    if (rules) badges.push(badge(`${rules} rule${rules === 1 ? '' : 's'}`));
+    if (source.filterDefault === 'drop') badges.push(badge('Drop by default', 'bg-red-900/40 border border-red-700 text-red-200'));
+
     const patterns = ['liveIncludeRegex', 'liveExcludeRegex', 'seriesIncludeRegex', 'seriesExcludeRegex',
         'vodIncludeRegex', 'vodExcludeRegex', 'liveCategoryRegex', 'vodCategoryRegex', 'seriesCategoryRegex']
         .filter(k => source[k]).length;
@@ -376,15 +383,18 @@ function readSourceForm() {
         userAgent: document.getElementById('source-user-agent').value || '',
         reqOrigin: document.getElementById('source-origin').value || '',
         reqReferrer: document.getElementById('source-referrer').value || '',
-        liveIncludeRegex: document.getElementById('source-live-include-regex').value.trim(),
-        liveExcludeRegex: document.getElementById('source-live-exclude-regex').value.trim(),
-        seriesIncludeRegex: document.getElementById('source-series-include-regex').value.trim(),
-        seriesExcludeRegex: document.getElementById('source-series-exclude-regex').value.trim(),
-        vodIncludeRegex: document.getElementById('source-vod-include-regex').value.trim(),
-        vodExcludeRegex: document.getElementById('source-vod-exclude-regex').value.trim(),
-        liveCategoryRegex: document.getElementById('source-live-category-regex').value.trim(),
-        vodCategoryRegex: document.getElementById('source-vod-category-regex').value.trim(),
-        seriesCategoryRegex: document.getElementById('source-series-category-regex').value.trim(),
+        liveIncludeRegex: document.getElementById('source-live-include-regex').value,
+        liveExcludeRegex: document.getElementById('source-live-exclude-regex').value,
+        seriesIncludeRegex: document.getElementById('source-series-include-regex').value,
+        seriesExcludeRegex: document.getElementById('source-series-exclude-regex').value,
+        vodIncludeRegex: document.getElementById('source-vod-include-regex').value,
+        vodExcludeRegex: document.getElementById('source-vod-exclude-regex').value,
+        liveCategoryRegex: document.getElementById('source-live-category-regex').value,
+        vodCategoryRegex: document.getElementById('source-vod-category-regex').value,
+        seriesCategoryRegex: document.getElementById('source-series-category-regex').value,
+        filterProfile: document.getElementById('source-filter-profile').value,
+        filterRules: sourceRuleEditor ? sourceRuleEditor.getRules() : [],
+        filterDefault: filterDefaultAction(),
         ...collectFilterFields(),
     };
 }
@@ -407,7 +417,7 @@ async function saveSource() {
             showNotification('"Only selected groups" needs at least one group or a group pattern', 'danger');
             return;
         }
-        if (FILTER_REGEX_IDS.some(id => !validateRegexInput(document.getElementById(id)))) {
+        if (FILTER_REGEX_IDS.some(id => !validateRegexInput(document.getElementById(id))) || !sourceRuleEditor.validate()) {
             showNotification('Fix the highlighted pattern first', 'danger');
             return;
         }

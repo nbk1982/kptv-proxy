@@ -74,6 +74,9 @@ type sourceAlias struct {
 	GroupFilterRegex       string            `json:"groupFilterRegex"`
 	ImportTypes            []string          `json:"importTypes"`
 	GroupTypeOverrides     map[string]string `json:"groupTypeOverrides"`
+	FilterProfile          string            `json:"filterProfile"`
+	FilterRules            []FilterRule      `json:"filterRules"`
+	FilterDefault          string            `json:"filterDefault"`
 }
 
 // fill copies the alias into dst, parsing the duration strings. It writes
@@ -107,6 +110,9 @@ func (s sourceAlias) fill(dst *SourceConfig) error {
 		GroupFilterRegex:       s.GroupFilterRegex,
 		ImportTypes:            s.ImportTypes,
 		GroupTypeOverrides:     s.GroupTypeOverrides,
+		FilterProfile:          s.FilterProfile,
+		FilterRules:            s.FilterRules,
+		FilterDefault:          s.FilterDefault,
 	}
 
 	var err error
@@ -135,9 +141,12 @@ func ParseSourceJSON(data []byte, dst *SourceConfig) error {
 }
 
 // HasContentFilters reports whether any import-time filter is configured, so
-// the engine can skip the pattern work for a source that keeps everything.
+// the engine can skip the pattern work for a source that keeps everything. A
+// named profile counts even when it turns out to be empty, since resolving it
+// is the engine's job, not the caller's.
 func (s *SourceConfig) HasContentFilters() bool {
-	return s.GroupFilterMode != GroupFilterOff || s.GroupFilterRegex != "" ||
+	return s.FilterProfile != "" || len(s.FilterRules) > 0 || s.FilterDefault == FilterDefaultDrop ||
+		s.GroupFilterMode != GroupFilterOff || s.GroupFilterRegex != "" ||
 		len(s.ImportTypes) > 0 || len(s.GroupTypeOverrides) > 0 ||
 		s.LiveCategoryRegex != "" || s.VODCategoryRegex != "" || s.SeriesCategoryRegex != "" ||
 		s.LiveIncludeRegex != "" || s.LiveExcludeRegex != "" ||
@@ -166,6 +175,17 @@ func (s *SourceConfig) ImportsType(contentType string) bool {
 // silently disabled at import time, which is what compilePattern in the filter
 // engine would otherwise do.
 func (s *SourceConfig) NormalizeFilters() error {
+	owner := fmt.Sprintf("source %q", s.Name)
+
+	s.FilterProfile = strings.TrimSpace(s.FilterProfile)
+	var err error
+	if s.FilterDefault, err = normalizeDefault(s.FilterDefault, owner); err != nil {
+		return err
+	}
+	if s.FilterRules, err = NormalizeRules(s.FilterRules, owner); err != nil {
+		return err
+	}
+
 	switch s.GroupFilterMode {
 	case GroupFilterOff, GroupFilterInclude, GroupFilterExclude:
 	default:
@@ -173,7 +193,6 @@ func (s *SourceConfig) NormalizeFilters() error {
 	}
 
 	s.GroupFilterList = dedupeGroups(s.GroupFilterList)
-	s.GroupFilterRegex = strings.TrimSpace(s.GroupFilterRegex)
 	if s.GroupFilterMode == GroupFilterInclude && len(s.GroupFilterList) == 0 && s.GroupFilterRegex == "" {
 		return fmt.Errorf("source %q: \"only selected groups\" keeps nothing; select at least one group or add a group pattern", s.Name)
 	}
@@ -282,6 +301,10 @@ func FiltersEqual(a, b *SourceConfig) bool {
 		a.LiveIncludeRegex != b.LiveIncludeRegex || a.LiveExcludeRegex != b.LiveExcludeRegex ||
 		a.SeriesIncludeRegex != b.SeriesIncludeRegex || a.SeriesExcludeRegex != b.SeriesExcludeRegex ||
 		a.VODIncludeRegex != b.VODIncludeRegex || a.VODExcludeRegex != b.VODExcludeRegex {
+		return false
+	}
+	if a.FilterProfile != b.FilterProfile || a.FilterDefault != b.FilterDefault ||
+		!slices.Equal(a.FilterRules, b.FilterRules) {
 		return false
 	}
 	return slices.Equal(a.GroupFilterList, b.GroupFilterList) &&

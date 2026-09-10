@@ -17,7 +17,7 @@ func stream(name, url, group string, stamped types.ContentType) *types.Stream {
 
 func run(t *testing.T, src *config.SourceConfig, in ...*types.Stream) []*types.Stream {
 	t.Helper()
-	return FilterStreams(in, src, NewFilterManager())
+	return FilterStreams(in, src, nil, NewFilterManager())
 }
 
 func TestCategoryRegexOverridesImporterStamp(t *testing.T) {
@@ -156,7 +156,7 @@ func TestPatternEditInvalidatesTheCachedFilter(t *testing.T) {
 	src := &config.SourceConfig{URL: "http://p/list.m3u8", VODCategoryRegex: "^filmes"}
 
 	s := stream("Filmes | Duna", "http://p/a/1.mkv", "Filmes", types.ContentTypeLive)
-	FilterStreams([]*types.Stream{s}, src, fm)
+	FilterStreams([]*types.Stream{s}, src, nil, fm)
 	if s.ContentType != types.ContentTypeVOD {
 		t.Fatalf("setup: want vod, got %q", s.ContentType)
 	}
@@ -165,7 +165,7 @@ func TestPatternEditInvalidatesTheCachedFilter(t *testing.T) {
 	src.VODCategoryRegex = ""
 	src.SeriesCategoryRegex = "^filmes"
 	s2 := stream("Filmes | Duna", "http://p/a/1.mkv", "Filmes", types.ContentTypeLive)
-	FilterStreams([]*types.Stream{s2}, src, fm)
+	FilterStreams([]*types.Stream{s2}, src, nil, fm)
 	if s2.ContentType != types.ContentTypeSeries {
 		t.Fatalf("stale cached filter served: want series, got %q", s2.ContentType)
 	}

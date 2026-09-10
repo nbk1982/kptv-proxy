@@ -343,6 +343,7 @@ function setupEventListeners() {
     document.getElementById('save-source-btn').addEventListener('click', () => saveSource());
     document.getElementById('import-all-btn').addEventListener('click', () => triggerImport('', true));
     initFilterPanel();
+    initFilterProfiles();
 
     // EPG buttons
     document.getElementById('add-epg-btn').addEventListener('click', () => showEPGModal());
@@ -436,6 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadGlobalSettings();
     loadSources();
+    loadFilterProfiles();
     loadEPGs();
     loadLocalSources();
     loadMetadata();

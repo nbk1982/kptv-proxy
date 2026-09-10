@@ -448,7 +448,8 @@ Quick copy buttons on each account card:
 - **Add/Edit Sources**: Full configuration interface for IPTV sources
 - **Per-Source Settings**: Custom timeouts, retry logic, connection limits
 - **Custom Headers**: Configure User-Agent, Origin, Referrer per source
-- **Content Filtering**: Per-source group picker fed by the provider's real group list, a Live/VOD/Series import gate, per-group type overrides and regex include/exclude patterns, with a live preview of what the rules keep before anything is saved
+- **Content Filtering**: Ordered keep/drop rules over the provider's group label, stream name or URL, with per-rule match counts, a group picker fed by the provider's real group list, and a live preview of what would be imported before anything is saved
+- **Filter Profiles**: A rule set stored on its own and attached to several sources, so providers that name their groups alike are filtered by one list you edit in a single place
 - **Import on Demand**: Saving a source applies it within seconds, no restart; "Import Now" re-imports every source and each card shows how its last import went
 - **Priority Management**: Reorder sources by priority for failover
 - **XC API Sources**: Set username and password for Xtream Codes API sources
@@ -726,23 +727,51 @@ Each stream is classified as `live`, `vod`, or `series` so filters, XC catalog p
 
 ### Content Filtering
 
-Every source's catalog goes through four stages at import, each of which can only narrow the result:
+**Rules are the main control.** Each source carries an ordered list; the first rule whose pattern matches a stream decides whether it is imported, and nothing below it is consulted. A rule is a regular expression plus the value it applies to:
 
-1. **Groups** — `groupFilterMode` is `""` (import every group), `include` (keep only the groups in `groupFilterList` or matching `groupFilterRegex`) or `exclude` (drop those and keep the rest). Group labels come from `group-title` (then `tvg-group`); for XC sources that is the provider's category name. Labels are compared lowercased, trimmed and with whitespace collapsed, so a selection survives a provider changing `♦️  GLOBO` to `♦️ Globo`. Streams without a group carry the empty label and can be listed like any other.
-2. **Classification** — the stream's type is decided as described under Content Type Classification: group override, then category patterns, then the importer's own stamp.
-3. **Content types** — `importTypes` lists the types to import (`live`, `vod`, `series`); empty means all. `["live"]` is the one-line answer to "I only want TV channels".
-4. **Name & URL patterns** — the per-type include/exclude regexes.
+| Field | Matched against |
+|-------|-----------------|
+| `group` | the provider's group label — `group-title`, or `tvg-group` when that is empty; for XC sources, the category name |
+| `name` | the stream's name as imported (the M3U display name, i.e. `tvg-name`) |
+| `url` | the stream's address |
+| `any` | all three |
 
-The admin UI's Content Filtering tab drives all of this: the group list is populated from the source's last import (or fetched on demand for a new source) with counts and the detected type per group, and **Preview** runs the draft rules against the provider's catalog and reports how many streams each group and type would keep, before anything is saved. Invalid patterns and an include list that would keep nothing are rejected on save with a message naming the field.
+Patterns are matched **case-insensitively** unless they open with their own flag group (`(?-i)…`), and are stored **exactly as typed** — whitespace is part of a regular expression, and providers do mark whole families of groups with a run of spaces, so `^♦️  ` (two spaces) is not the same rule as `^♦️ `.
+
+`filterDefault` settles a stream no rule matched: `keep` (the default) makes the list a deny list, `drop` makes it an allow list. So "only live TV from this provider" is two rules and one switch:
+
+```json
+{
+  "filterDefault": "drop",
+  "filterRules": [
+    { "field": "name",  "action": "exclude", "pattern": " sd$|\\[alt\\]", "note": "duplicate feeds" },
+    { "field": "group", "action": "include", "pattern": "^♦️  ",           "note": "live TV families" }
+  ]
+}
+```
+
+The exclusion comes first on purpose: put the exceptions above the broad rules. A **Preview** in the admin UI reports, per rule, how many streams it decided and how many its pattern matched in total, which is how a rule that is shadowed by an earlier one or that matches nothing at all shows itself.
+
+**Filter profiles** are rule sets of their own, attached to any number of sources by name (`filterProfile`). A profile's rules are evaluated before the source's own, and its `default` applies unless the source sets one. Editing a profile changes every source using it; renaming one carries them along; deleting one leaves them with their own rules. Two providers with the same group naming — a reseller's two lines, say — are then filtered by a single list.
+
+Three further stages run after the rules, each of which can only narrow the result further. They predate the rules and are collapsed under *advanced* in the UI:
+
+1. **Groups** — `groupFilterMode` is `""` (import every group), `include` (keep only the groups in `groupFilterList` or matching `groupFilterRegex`) or `exclude` (drop those). Labels are compared lowercased and with whitespace collapsed, so a *selection* survives a provider changing `♦️  GLOBO` to `♦️ Globo`. The group list in the UI is also where the labels to write rules against are found: each row turns into a rule with one click.
+2. **Content types** — `importTypes` lists the types to import (`live`, `vod`, `series`); empty means all. This is only as good as the provider's own classification: a catalogue whose URLs carry no `/movie/` or `/series/` hint arrives entirely as `live`, and the counts beside each type in the UI say so. Use rules instead when that happens.
+3. **Name & URL patterns** — the older per-type include/exclude regexes, which match name, group and URL as separate lowercased subjects.
 
 Saving a source starts an import right away and the source card shows progress and the outcome; there is no restart. The same is available over the API:
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/sources/groups?url=` | Group inventory recorded by the source's last import |
-| `POST /api/sources/preview` | `{ "source": {...}, "force": false }` — evaluate a draft source, returns the filter report |
+| `POST /api/sources/preview` | `{ "source": {...}, "profile": {...}, "force": false }` — evaluate a draft source, and optionally an unsaved profile, returning the filter report with per-rule counts |
 | `POST /api/import` | Re-import every source in the background; `409` while one runs. `{ "url": "…", "force": true }` discards that one source's cached catalog first, so it is re-downloaded while the others are re-filtered from cache |
 | `GET /api/import/status` | Running flag plus each source's last import outcome |
+| `GET /api/filter-profiles` | Every profile, with the sources attached to it |
+| `POST /api/filter-profiles` | Create one; `409` if the name is taken |
+| `PUT /api/filter-profiles/{id}` | Replace one; a rename re-points the sources that named it |
+| `DELETE /api/filter-profiles/{id}` | Delete one; `409` while sources use it, `?force=true` detaches them |
 
 ### Global Settings
 
@@ -798,6 +827,9 @@ Saving a source starts an import right away and the source card shows progress a
 | `groupFilterRegex` | No | Pattern on the lowercased group label, combined with the list | `"^♦️  "` |
 | `importTypes` | No | Content types to import; empty means all | `["live"]` |
 | `groupTypeOverrides` | No | Group label → type forced for that group; outranks every pattern | `{"CANAIS 24H \| SERIES": "live"}` |
+| `filterRules` | No | Ordered keep/drop rules; the first match decides | `[{"field":"group","action":"include","pattern":"^canais"}]` |
+| `filterDefault` | No | Verdict for a stream no rule matched: `keep` (default) or `drop` | `"drop"` |
+| `filterProfile` | No | Name of a shared rule set evaluated before this source's own rules | `"Live TV only"` |
 
 For XC sources, the importer fetches live, series, and VOD catalogs plus each type's category list. `group-title` is set from the provider's category name where available, falling back to the content type name. Every filter stage runs after the full catalog is fetched, and saving a source from the admin UI starts an import at once, so a changed rule is live within seconds; a source whose raw catalog is still cached is not downloaded again for that. Those six include and exclude regexes previously matched the stream name only. They now match the stream name, its `group-title`/`tvg-group` labels, and its URL, each as a separate lowercased subject, so `^` and `$` anchor to one field rather than to a concatenation of all of them and a pattern containing uppercase letters no longer matches. Editing a source's filters also invalidates any previously compiled filter for that source immediately, rather than waiting for a restart.
 

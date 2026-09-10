@@ -301,7 +301,7 @@ func (sp *StreamProxy) ImportStreams() {
 
 			beforeFilter := len(streams)
 			var report *filter.Report
-			streams, report = filter.Apply(streams, src, sp.FilterManager)
+			streams, report = filter.Apply(streams, src, sp.Config, sp.FilterManager, filter.Options{})
 			if beforeFilter != len(streams) {
 				logger.Debug("{proxy/stream - ImportStreams} Filtered %d streams down to %d for source: %s", beforeFilter, len(streams), src.Name)
 			}
