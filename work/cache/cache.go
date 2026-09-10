@@ -312,6 +312,20 @@ func (c *Cache) SetXCData(key, value string) {
 	c.cache.Set(hashKey(key), value)
 }
 
+// HasXCData reports whether a raw catalog is cached, without counting as a
+// hit or refreshing its expiry.
+func (c *Cache) HasXCData(key string) bool {
+	_, ok := c.cache.GetEntryQuietly(hashKey(key))
+	return ok
+}
+
+// InvalidateXCData drops one cached raw catalog so the next import fetches
+// it from the provider again.
+func (c *Cache) InvalidateXCData(key string) {
+	logger.Debug("{cache - InvalidateXCData} drop the cached catalog")
+	c.cache.Invalidate(hashKey(key))
+}
+
 // ClearIfNeeded is kept for API compatibility. Otter handles eviction automatically.
 func (c *Cache) ClearIfNeeded() {
 	logger.Debug("{cache - ClearIfNeeded} clear the cache")

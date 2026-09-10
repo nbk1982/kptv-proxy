@@ -111,6 +111,7 @@ type InternalConstants struct {
 	// work/restream/hls.go — streamSegment()
 	// -------------------------------------------------------------------------
 	HLSSegmentFetchTimeout           time.Duration // HTTP context timeout when fetching a single HLS segment
+	PlaylistFetchTimeout             time.Duration // HTTP context timeout when downloading a source playlist during import
 	HLSMaxConsecutiveSegmentErrors   int           // Max consecutive read errors within a single segment before giving up
 	HLSSegmentActivityUpdateInterval time.Duration // How often LastActivity is refreshed while streaming a segment
 
@@ -321,6 +322,11 @@ type InternalConstants struct {
 	ServerIdleTO       time.Duration // Max keep-alive idle time between requests
 
 	// -------------------------------------------------------------------------
+	// work/proxy/importctl.go — PreviewSource()
+	// -------------------------------------------------------------------------
+	PreviewCacheTTL time.Duration // How long the last previewed raw catalog is held for re-evaluation
+
+	// -------------------------------------------------------------------------
 	// work/db/db.go — Get()
 	// -------------------------------------------------------------------------
 	DataDir      string // Directory holding the database, EPG cache and legacy config.json
@@ -403,6 +409,7 @@ var Internal = InternalConstants{
 	HLSPlaylistRefreshInterval:       2 * time.Second,
 	HLSPlaylistFetchTimeout:          10 * time.Second,
 	HLSSegmentFetchTimeout:           30 * time.Second,
+	PlaylistFetchTimeout:             5 * time.Minute,
 	HLSMaxSegmentErrors:              5,
 	HLSMaxConsecutiveSegmentErrors:   5,
 	HLSSegmentActivityUpdateInterval: 5 * time.Second,
@@ -530,6 +537,7 @@ var Internal = InternalConstants{
 	// -------------------------------------------------------------------------
 	// Server / database
 	// -------------------------------------------------------------------------
+	PreviewCacheTTL:    5 * time.Minute,
 	ServerPort:         8080,
 	ServerReadHeaderTO: 10 * time.Second,
 	ServerReadTO:       60 * time.Second,

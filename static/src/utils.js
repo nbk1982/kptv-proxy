@@ -12,6 +12,49 @@ function escapeHtml(text) {
 }
 
 /**
+ * Escapes a value for use inside a double-quoted HTML attribute.
+ * escapeHtml leaves quotes alone, which is fine for text nodes but not here.
+ * @param {string} text - Raw text to escape
+ * @returns {string} Attribute-safe string
+ */
+function escapeAttr(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * Escapes a value for use inside a CSS attribute selector.
+ * @param {string} value
+ * @returns {string}
+ */
+function cssEscape(value) {
+    return (window.CSS && CSS.escape) ? CSS.escape(value) : String(value).replace(/["\\]/g, '\\$&');
+}
+
+/**
+ * Formats a count with thousands separators.
+ * @param {number} n
+ * @returns {string}
+ */
+function formatCount(n) {
+    return Number(n || 0).toLocaleString('en-US');
+}
+
+/**
+ * Describes how long ago a timestamp was, coarsely.
+ * @param {string|Date} when - ISO timestamp or Date
+ * @returns {string}
+ */
+function timeAgo(when) {
+    const seconds = Math.max(0, (Date.now() - new Date(when).getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+    return `${Math.floor(seconds / 86400)} d ago`;
+}
+
+/**
  * Obfuscates a URL for display, showing only protocol and hostname
  * while masking path and query string components.
  * @param {string} url - Full URL to obfuscate

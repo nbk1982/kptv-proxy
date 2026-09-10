@@ -28,23 +28,28 @@ let metaTotal = 0;
  * @returns {Promise<any>} Parsed JSON response
  */
 async function apiCall(endpoint, options = {}) {
+    // quiet callers show their own, more specific notification
+    const { quiet = false, ...fetchOptions } = options;
     try {
         const response = await fetch(endpoint, {
             headers: {
                 'Content-Type': 'application/json',
-                ...options.headers
+                ...fetchOptions.headers
             },
-            ...options
+            ...fetchOptions
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            // the server explains rejections in the body, e.g. which pattern is invalid
+            let detail = '';
+            try { detail = (await response.text()).trim(); } catch (e) { /* no body */ }
+            throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
         }
 
         return await response.json();
     } catch (error) {
         console.error('API call failed:', error);
-        showNotification('API call failed: ' + error.message, 'danger');
+        if (!quiet) showNotification('API call failed: ' + error.message, 'danger');
         throw error;
     }
 }
@@ -336,6 +341,8 @@ function setupEventListeners() {
     // Source buttons
     document.getElementById('add-source-btn').addEventListener('click', () => showSourceModal());
     document.getElementById('save-source-btn').addEventListener('click', () => saveSource());
+    document.getElementById('import-all-btn').addEventListener('click', () => triggerImport('', true));
+    initFilterPanel();
 
     // EPG buttons
     document.getElementById('add-epg-btn').addEventListener('click', () => showEPGModal());
@@ -441,6 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTokens();
 
     loadEPGMappings();
+    pollImportStatus();
 
     startAutoRefresh();
 

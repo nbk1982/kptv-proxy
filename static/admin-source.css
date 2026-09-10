@@ -6,6 +6,11 @@
     body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+
+    /* the hidden attribute wins over display utilities such as .flex */
+    [hidden] {
+        display: none !important;
+    }
 }
 
 @layer components {
@@ -176,6 +181,64 @@
 
     .stat-badge {
         @apply bg-black text-gray-300 text-xs px-2 py-1 border border-kptv-border rounded;
+    }
+
+    /* content filtering panel */
+    .filter-input {
+        @apply w-full bg-kptv-gray-light border border-kptv-border rounded px-3 py-2 text-gray-100 focus:outline-none focus:border-kptv-blue;
+    }
+
+    .filter-input.invalid {
+        @apply border-red-500 focus:border-red-500;
+    }
+
+    .seg {
+        @apply inline-flex rounded border border-kptv-border overflow-hidden text-xs;
+    }
+
+    .seg-btn {
+        @apply px-3 py-1.5 bg-kptv-gray-light hover:bg-kptv-border transition-colors;
+    }
+
+    .seg-btn.active {
+        @apply bg-kptv-blue text-white;
+    }
+
+    .chip {
+        @apply px-2 py-0.5 rounded text-xs border border-kptv-border bg-kptv-gray-light hover:border-kptv-blue transition-colors;
+    }
+
+    .chip.active {
+        @apply bg-kptv-blue border-kptv-blue text-white;
+    }
+
+    .type-toggle {
+        @apply flex items-center gap-2 px-3 py-2 rounded border border-kptv-border bg-kptv-gray-light text-sm text-left cursor-pointer select-none transition-colors opacity-50;
+    }
+
+    .type-toggle.on {
+        @apply opacity-100 border-kptv-blue;
+    }
+
+    .type-dot {
+        @apply w-2.5 h-2.5 rounded-full inline-block flex-shrink-0;
+    }
+
+    .group-row {
+        @apply flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 hover:bg-kptv-gray-light cursor-pointer;
+    }
+
+    .group-row.selected {
+        @apply bg-kptv-blue/10;
+    }
+
+    .group-row.missing {
+        @apply opacity-70;
+    }
+
+    .spinner-sm {
+        @apply inline-block border-2 border-white/30 border-t-white rounded-full w-3.5 h-3.5 flex-shrink-0;
+        animation: spin 1s linear infinite;
     }
 
     .in-totop {

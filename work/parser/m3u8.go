@@ -64,12 +64,12 @@ func classifyStreamContent(streamName, streamURL string, existingGroup string) t
 func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg *config.Config, source *config.SourceConfig, rateLimiter ratelimit.Limiter, cache *cache.Cache) []*types.Stream {
 	logger.Debug("{parser/m3u8 - ParseM3U8} Parsing M3U8 from %s", utils.LogURL(cfg, source.URL))
 
-	cacheKey := fmt.Sprintf("m3u8:%s", source.URL)
+	cacheKey := RawCacheKey(source)
 	if cached, found := cache.GetXCData(cacheKey); found {
 		logger.Debug("{parser/m3u8 - ParseM3U8} Using cached M3U8 data for %s", source.Name)
 		var streams []*types.Stream
 		if err := json.Unmarshal([]byte(cached), &streams); err == nil {
-			return streams
+			return adoptSource(streams, source)
 		}
 	}
 
@@ -79,8 +79,10 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 		return nil
 	}
 
-	// bound the fetch, but never outlive the caller's import context
-	ctx, cancel := context.WithTimeout(ctx, constants.Internal.HLSSegmentFetchTimeout)
+	// bound the fetch, but never outlive the caller's import context. A
+	// provider catalog is megabytes of text, so this is the playlist budget
+	// and not the much shorter one a single HLS segment gets.
+	ctx, cancel := context.WithTimeout(ctx, constants.Internal.PlaylistFetchTimeout)
 	defer cancel()
 
 	req, err := http.NewRequest("GET", source.URL, nil)
@@ -121,6 +123,15 @@ func ParseM3U8(ctx context.Context, httpClient *client.HeaderSettingClient, cfg 
 	} else {
 		logger.Debug("{parser/m3u8 - ParseM3U8} Grafov parser failed, using fallback parser: %v", err)
 		streams = ParseM3U8Fallback(io.MultiReader(bytes.NewReader(consumed.Bytes()), resp.Body), source, cfg)
+	}
+
+	// a body cut short by the deadline parses into a partial catalog that is
+	// indistinguishable from a small one, so discard it rather than caching a
+	// truncated playlist and dropping every channel past the cut
+	if ctx.Err() != nil {
+		logger.Error("{parser/m3u8 - ParseM3U8} Download of %s did not complete (%v), discarding %d partial streams",
+			utils.LogURL(cfg, source.URL), ctx.Err(), len(streams))
+		return nil
 	}
 
 	// if there's actually streams

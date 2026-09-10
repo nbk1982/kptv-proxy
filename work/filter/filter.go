@@ -5,6 +5,9 @@ import (
 	"kptv-proxy/work/logger"
 	"kptv-proxy/work/types"
 	"kptv-proxy/work/utils"
+	"maps"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -15,10 +18,18 @@ import (
 // in the same precedence order utils.ContentTypeOfStream uses.
 var groupAttributeKeys = []string{"group-title", "tvg-group"}
 
-// CompiledFilter holds compiled regex patterns for a source. The Category
-// patterns decide which content type a stream is; the Include/Exclude patterns
-// decide whether a stream of that type survives the import.
+// CompiledFilter holds the compiled rules for one source. Every stream goes
+// through the stages in this order, and each stage only ever narrows: the
+// group filter, classification into a content type (group override, category
+// patterns, importer heuristics), the content type gate, and finally that
+// type's include/exclude patterns.
 type CompiledFilter struct {
+	GroupMode   string                         // config.GroupFilterInclude, config.GroupFilterExclude, or "" when off
+	GroupSet    map[string]struct{}            // config.GroupKey of every listed group
+	GroupRegex  *regexp.Regexp                 // optional pattern on the group label, ORed with GroupSet
+	ImportTypes map[types.ContentType]struct{} // content types that are imported; nil imports every type
+	GroupTypes  map[string]types.ContentType   // config.GroupKey -> content type forced for that group
+
 	LiveCategory   *regexp.Regexp
 	VODCategory    *regexp.Regexp
 	SeriesCategory *regexp.Regexp
@@ -60,6 +71,34 @@ func compilePattern(field, pattern string) *regexp.Regexp {
 	return compiled
 }
 
+// filterSignature serializes every rule of a source so a cached filter can be
+// recognised as stale. The override map is sorted so two equal maps always
+// produce the same string.
+func filterSignature(source *config.SourceConfig) string {
+	overrides := make([]string, 0, len(source.GroupTypeOverrides))
+	for group, contentType := range source.GroupTypeOverrides {
+		overrides = append(overrides, group+"="+contentType)
+	}
+	sort.Strings(overrides)
+
+	return strings.Join([]string{
+		source.LiveCategoryRegex,
+		source.VODCategoryRegex,
+		source.SeriesCategoryRegex,
+		source.LiveIncludeRegex,
+		source.LiveExcludeRegex,
+		source.SeriesIncludeRegex,
+		source.SeriesExcludeRegex,
+		source.VODIncludeRegex,
+		source.VODExcludeRegex,
+		source.GroupFilterMode,
+		strings.Join(source.GroupFilterList, "\x01"),
+		source.GroupFilterRegex,
+		strings.Join(source.ImportTypes, "\x01"),
+		strings.Join(overrides, "\x01"),
+	}, "\x00")
+}
+
 // GetOrCreateFilter gets or creates a compiled filter for a source
 func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *CompiledFilter {
 
@@ -70,18 +109,8 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 	// Use source URL as key since it's unique
 	key := source.URL
 
-	// the cache is keyed on URL, so a regex edit alone would otherwise keep serving the stale filter
-	signature := strings.Join([]string{
-		source.LiveCategoryRegex,
-		source.VODCategoryRegex,
-		source.SeriesCategoryRegex,
-		source.LiveIncludeRegex,
-		source.LiveExcludeRegex,
-		source.SeriesIncludeRegex,
-		source.SeriesExcludeRegex,
-		source.VODIncludeRegex,
-		source.VODExcludeRegex,
-	}, "\x00")
+	// the cache is keyed on URL, so a rule edit alone would otherwise keep serving the stale filter
+	signature := filterSignature(source)
 
 	// if it already exists and nothing changed
 	if filter, exists := fm.filters[key]; exists {
@@ -95,6 +124,8 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 	// setup the compiled filter (an invalid pattern is logged and skipped)
 	filter := &CompiledFilter{
 		signature:      signature,
+		GroupMode:      source.GroupFilterMode,
+		GroupRegex:     compilePattern("GroupFilterRegex", source.GroupFilterRegex),
 		LiveCategory:   compilePattern("LiveCategoryRegex", source.LiveCategoryRegex),
 		VODCategory:    compilePattern("VODCategoryRegex", source.VODCategoryRegex),
 		SeriesCategory: compilePattern("SeriesCategoryRegex", source.SeriesCategoryRegex),
@@ -104,6 +135,28 @@ func (fm *FilterManager) GetOrCreateFilter(source *config.SourceConfig) *Compile
 		SeriesExclude:  compilePattern("SeriesExcludeRegex", source.SeriesExcludeRegex),
 		VODInclude:     compilePattern("VODIncludeRegex", source.VODIncludeRegex),
 		VODExclude:     compilePattern("VODExcludeRegex", source.VODExcludeRegex),
+	}
+
+	if len(source.GroupFilterList) > 0 {
+		filter.GroupSet = make(map[string]struct{}, len(source.GroupFilterList))
+		for _, group := range source.GroupFilterList {
+			filter.GroupSet[config.GroupKey(group)] = struct{}{}
+		}
+	}
+	if len(source.ImportTypes) > 0 {
+		filter.ImportTypes = make(map[types.ContentType]struct{}, len(source.ImportTypes))
+		for _, contentType := range source.ImportTypes {
+			filter.ImportTypes[types.ContentType(contentType)] = struct{}{}
+		}
+	}
+	if len(source.GroupTypeOverrides) > 0 {
+		filter.GroupTypes = make(map[string]types.ContentType, len(source.GroupTypeOverrides))
+		// sorted so two spellings of one label always resolve the same way;
+		// NormalizeFilters rejects conflicting pairs, but a config written
+		// before it existed can still carry them
+		for _, group := range slices.Sorted(maps.Keys(source.GroupTypeOverrides)) {
+			filter.GroupTypes[config.GroupKey(group)] = types.ContentType(source.GroupTypeOverrides[group])
+		}
 	}
 
 	fm.filters[key] = filter
@@ -126,6 +179,33 @@ func (fm *FilterManager) RemoveFilter(sourceURL string) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 	delete(fm.filters, sourceURL)
+}
+
+// passesGroupFilter applies the group stage. A group is "matched" when it is
+// listed or when the group pattern hits it; include mode keeps matched groups
+// and exclude mode drops them. Streams without a group carry the empty label,
+// which an operator can list like any other group.
+func (f *CompiledFilter) passesGroupFilter(group, groupKey string) bool {
+	if f.GroupMode == config.GroupFilterOff {
+		return true
+	}
+	_, matched := f.GroupSet[groupKey]
+	if !matched && f.GroupRegex != nil {
+		matched = f.GroupRegex.MatchString(groupSubject(group))
+	}
+	if f.GroupMode == config.GroupFilterExclude {
+		return !matched
+	}
+	return matched
+}
+
+// importsType applies the content type gate.
+func (f *CompiledFilter) importsType(contentType types.ContentType) bool {
+	if f.ImportTypes == nil {
+		return true
+	}
+	_, ok := f.ImportTypes[contentType]
+	return ok
 }
 
 // matchSubjects returns every string a source pattern is tested against: the
@@ -160,8 +240,9 @@ func matchesAny(pattern *regexp.Regexp, subjects []string) bool {
 	return false
 }
 
-// resolveContentType applies the per-source category patterns, falling back to
-// the shared resolver when none of them match or none are configured.
+// resolveContentType decides a stream's type. An operator's explicit verdict
+// for the stream's group outranks everything, then the per-source category
+// patterns apply, and the shared resolver settles what neither covers.
 //
 // A matching category pattern deliberately outranks the type the importer
 // stamped on the stream: every importer already stamps an explicit type, so a
@@ -169,7 +250,10 @@ func matchesAny(pattern *regexp.Regexp, subjects []string) bool {
 // first and live last, from most to least specific — series entries routinely
 // also carry "movie" or "vod" in their URL path, and live is the type every
 // unrecognised entry already falls back to.
-func resolveContentType(stream *types.Stream, filter *CompiledFilter, subjects []string) types.ContentType {
+func resolveContentType(stream *types.Stream, filter *CompiledFilter, subjects []string, groupKey string) types.ContentType {
+	if forced, ok := filter.GroupTypes[groupKey]; ok {
+		return forced
+	}
 	switch {
 	case filter.SeriesCategory != nil && matchesAny(filter.SeriesCategory, subjects):
 		return types.ContentTypeSeries
@@ -181,62 +265,68 @@ func resolveContentType(stream *types.Stream, filter *CompiledFilter, subjects [
 	return utils.ContentTypeOfStream(stream)
 }
 
-// FilterStreams classifies each stream against the source's category patterns
-// and then applies that type's include/exclude patterns.
-func FilterStreams(streams []*types.Stream, source *config.SourceConfig, filterManager *FilterManager) []*types.Stream {
+// Apply runs a source's rules over its raw catalog. It returns the streams that
+// survive, each stamped with the content type it was filtered as, and a Report
+// of what every group contributed. The report is what the import persists as
+// the source's inventory and what the admin preview shows before a save.
+//
+// The type stamp matters downstream: utils.ContentTypeOfStream returns an
+// explicit type verbatim, so playlist output, XC catalogs and playback routing
+// all serve the stream as the same type it was filtered as.
+func Apply(streams []*types.Stream, source *config.SourceConfig, filterManager *FilterManager) ([]*types.Stream, *Report) {
+	report := newReport()
 
-	// Debug logging to see if filtering is being called
-	if len(streams) > 0 && streams[0].Source != nil && streams[0].Source.Name != "" {
-		logger.Debug("{filter - FilterStreams} Source: %s, Streams: %d, Category: live=%s vod=%s series=%s, Include: live=%s series=%s vod=%s, Exclude: live=%s series=%s vod=%s\n",
-			source.Name, len(streams),
-			source.LiveCategoryRegex, source.VODCategoryRegex, source.SeriesCategoryRegex,
-			source.LiveIncludeRegex, source.SeriesIncludeRegex, source.VODIncludeRegex,
-			source.LiveExcludeRegex, source.SeriesExcludeRegex, source.VODExcludeRegex)
+	// a source without rules still needs the pass for its inventory, but not
+	// the per-stream pattern work
+	if !source.HasContentFilters() {
+		logger.Debug("{filter - Apply} No filters configured for source %s, keeping %d streams\n", source.Name, len(streams))
+		for _, stream := range streams {
+			group := GroupOf(stream)
+			stream.ContentType = utils.ContentTypeOfStream(stream)
+			report.observe(group, config.GroupKey(group), stream.ContentType, stream.Name, true)
+		}
+		report.finish()
+		return streams, report
 	}
 
-	// every pattern must be checked here — a source carrying only category
-	// patterns still needs the loop below to run in order to be reclassified
-	if source.LiveCategoryRegex == "" && source.VODCategoryRegex == "" && source.SeriesCategoryRegex == "" &&
-		source.LiveIncludeRegex == "" && source.LiveExcludeRegex == "" &&
-		source.SeriesIncludeRegex == "" && source.SeriesExcludeRegex == "" &&
-		source.VODIncludeRegex == "" && source.VODExcludeRegex == "" {
-		logger.Debug("{filter - FilterStreams} No filters configured for source %s, returning %d streams unchanged\n", source.Name, len(streams))
-		// return the streams
-		return streams
-	}
-	logger.Debug("{filter - FilterStreams} Applying filters to %d streams from source %s\n", len(streams), source.Name)
-
+	logger.Debug("{filter - Apply} Applying filters to %d streams from source %s\n", len(streams), source.Name)
 	filter := filterManager.GetOrCreateFilter(source)
-	filtered := make([]*types.Stream, 0, len(streams))
+	kept := make([]*types.Stream, 0, len(streams))
 
 	for _, stream := range streams {
+		group := GroupOf(stream)
+		groupKey := config.GroupKey(group)
 		subjects := matchSubjects(stream)
-		contentType := resolveContentType(stream, filter, subjects)
-
-		// persist the verdict on the stream. utils.ContentTypeOfStream returns an
-		// explicit type verbatim, so every downstream consumer — playlist output,
-		// XC catalogs, playback routing — now serves the stream as the same type
-		// it was filtered as, with no second classification to disagree with.
+		contentType := resolveContentType(stream, filter, subjects, groupKey)
 		stream.ContentType = contentType
 
-		shouldInclude := shouldIncludeStream(stream, filter, contentType, subjects)
-		logger.Debug("{filter - FilterStreams} Stream: %s, Type: %s, Include: %v\n", stream.Name, contentType, shouldInclude)
+		keep := filter.passesGroupFilter(group, groupKey) &&
+			filter.importsType(contentType) &&
+			shouldIncludeStream(stream, filter, contentType, subjects)
+		logger.Debug("{filter - Apply} Stream: %s, Group: %s, Type: %s, Include: %v\n", stream.Name, group, contentType, keep)
 
-		if shouldInclude {
-			filtered = append(filtered, stream)
+		report.observe(group, groupKey, contentType, stream.Name, keep)
+		if keep {
+			kept = append(kept, stream)
 		}
 	}
-	logger.Debug("{filter - FilterStreams} Filtered %d -> %d streams for source %s\n", len(streams), len(filtered), source.Name)
+	report.finish()
+	logger.Debug("{filter - Apply} Filtered %d -> %d streams for source %s\n", len(streams), len(kept), source.Name)
 
-	// return the filtered streams
-	return filtered
+	return kept, report
+}
+
+// FilterStreams applies a source's rules and returns the surviving streams. It
+// is Apply without the report, for callers that only need the result.
+func FilterStreams(streams []*types.Stream, source *config.SourceConfig, filterManager *FilterManager) []*types.Stream {
+	kept, _ := Apply(streams, source, filterManager)
+	return kept
 }
 
 // shouldIncludeStream determines if a stream should be included based on the
 // include/exclude patterns for the content type it was classified as.
 func shouldIncludeStream(stream *types.Stream, filter *CompiledFilter, contentType types.ContentType, subjects []string) bool {
 	originalName := stream.Name
-	logger.Debug("{filter - shouldIncludeStream} Evaluating stream: '%s', subjects: %v, content type: %s\n", originalName, subjects, contentType)
 
 	// Check include filters first - if any exist, stream must match at least one
 	var hasIncludeFilters bool
@@ -247,26 +337,18 @@ func shouldIncludeStream(stream *types.Stream, filter *CompiledFilter, contentTy
 		if filter.LiveInclude != nil {
 			hasIncludeFilters = true
 			matchesInclude = matchesAny(filter.LiveInclude, subjects)
-			logger.Debug("{filter - shouldIncludeStream} Live include pattern exists, matches: %v (tested against: %v)\n", matchesInclude, subjects)
-
 		}
 	case types.ContentTypeSeries:
 		if filter.SeriesInclude != nil {
 			hasIncludeFilters = true
 			matchesInclude = matchesAny(filter.SeriesInclude, subjects)
-			logger.Debug("{filter - shouldIncludeStream} Series include pattern exists, matches: %v\n", matchesInclude)
-
 		}
 	case types.ContentTypeVOD:
 		if filter.VODInclude != nil {
 			hasIncludeFilters = true
 			matchesInclude = matchesAny(filter.VODInclude, subjects)
-			logger.Debug("{filter - shouldIncludeStream} VOD include pattern exists, matches: %v\n", matchesInclude)
-
 		}
 	}
-
-	logger.Debug("{filter - shouldIncludeStream} hasIncludeFilters: %v, matchesInclude: %v\n", hasIncludeFilters, matchesInclude)
 
 	// If include filters exist but stream doesn't match any, exclude it
 	if hasIncludeFilters && !matchesInclude {
@@ -277,29 +359,21 @@ func shouldIncludeStream(stream *types.Stream, filter *CompiledFilter, contentTy
 	// Then check exclude filters
 	switch contentType {
 	case types.ContentTypeLive:
-		if filter.LiveExclude != nil {
-			if matchesAny(filter.LiveExclude, subjects) {
-				logger.Debug("{filter - shouldIncludeStream} EXCLUDED by live exclude filter: '%s'\n", originalName)
-				return false
-			}
-			logger.Debug("{filter - shouldIncludeStream} Live exclude pattern exists but didn't match: %v\n", subjects)
+		if filter.LiveExclude != nil && matchesAny(filter.LiveExclude, subjects) {
+			logger.Debug("{filter - shouldIncludeStream} EXCLUDED by live exclude filter: '%s'\n", originalName)
+			return false
 		}
 	case types.ContentTypeSeries:
-		if filter.SeriesExclude != nil {
-			if matchesAny(filter.SeriesExclude, subjects) {
-				logger.Debug("{filter - shouldIncludeStream} EXCLUDED by series exclude filter: '%s'\n", originalName)
-				return false
-			}
+		if filter.SeriesExclude != nil && matchesAny(filter.SeriesExclude, subjects) {
+			logger.Debug("{filter - shouldIncludeStream} EXCLUDED by series exclude filter: '%s'\n", originalName)
+			return false
 		}
 	case types.ContentTypeVOD:
-		if filter.VODExclude != nil {
-			if matchesAny(filter.VODExclude, subjects) {
-				logger.Debug("{filter - shouldIncludeStream} EXCLUDED by VOD exclude filter: '%s'\n", originalName)
-				return false
-			}
+		if filter.VODExclude != nil && matchesAny(filter.VODExclude, subjects) {
+			logger.Debug("{filter - shouldIncludeStream} EXCLUDED by VOD exclude filter: '%s'\n", originalName)
+			return false
 		}
 	}
 
-	logger.Debug("{filter - shouldIncludeStream} INCLUDED: '%s'\n", originalName)
 	return true
 }

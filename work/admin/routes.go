@@ -23,6 +23,12 @@ func SetupAdminRoutes(router *mux.Router, sp *proxy.StreamProxy) {
 	router.HandleFunc("/api/config", authCORS(users.PermRead, middleware.GzipMiddleware(handleGetConfig(sp)))).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/config", authCORS(users.PermConfigWrite, handleSetConfig(sp))).Methods("POST", "OPTIONS")
 
+	// Source inventory, filter preview and on-demand import
+	router.HandleFunc("/api/sources/groups", authCORS(users.PermRead, middleware.GzipMiddleware(handleGetSourceGroups(sp)))).Methods("GET", "OPTIONS")
+	router.HandleFunc("/api/sources/preview", authCORS(users.PermConfigWrite, middleware.GzipMiddleware(handlePreviewSource(sp)))).Methods("POST", "OPTIONS")
+	router.HandleFunc("/api/import", authCORS(users.PermConfigWrite, handleTriggerImport(sp))).Methods("POST", "OPTIONS")
+	router.HandleFunc("/api/import/status", authCORS(users.PermRead, handleImportStatus(sp))).Methods("GET", "OPTIONS")
+
 	// Stats endpoint
 	router.HandleFunc("/api/stats", authCORS(users.PermRead, middleware.GzipMiddleware(handleGetStats(sp)))).Methods("GET", "OPTIONS")
 
@@ -36,7 +42,7 @@ func SetupAdminRoutes(router *mux.Router, sp *proxy.StreamProxy) {
 	router.HandleFunc("/api/channels/{channel}/revive-stream", authCORS(users.PermStreams, handleReviveStream(sp))).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/channels/{channel}/order", authCORS(users.PermStreams, handleSetChannelOrder(sp))).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/channels/{channel}/order", authCORS(users.PermStreams, handleResetChannelOrder(sp))).Methods("DELETE", "OPTIONS")
-	
+
 	// Log endpoints
 	router.HandleFunc("/api/logs", authCORS(users.PermLogs, middleware.GzipMiddleware(handleGetLogs))).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/logs", authCORS(users.PermLogs, handleClearLogs)).Methods("DELETE", "OPTIONS")

@@ -33,29 +33,34 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 
 		// Marshal sources with duration fields as strings.
 		type sourceOut struct {
-			Name                   string `json:"name"`
-			URL                    string `json:"url"`
-			Order                  int    `json:"order"`
-			MaxConnections         int    `json:"maxConnections"`
-			MaxStreamTimeout       string `json:"maxStreamTimeout"`
-			RetryDelay             string `json:"retryDelay"`
-			MaxRetries             int    `json:"maxRetries"`
-			MaxFailuresBeforeBlock int    `json:"maxFailuresBeforeBlock"`
-			MinDataSize            int64  `json:"minDataSize"`
-			UserAgent              string `json:"userAgent"`
-			ReqOrigin              string `json:"reqOrigin"`
-			ReqReferrer            string `json:"reqReferrer"`
-			Username               string `json:"username"`
-			Password               string `json:"password"`
-			LiveIncludeRegex       string `json:"liveIncludeRegex"`
-			LiveExcludeRegex       string `json:"liveExcludeRegex"`
-			SeriesIncludeRegex     string `json:"seriesIncludeRegex"`
-			SeriesExcludeRegex     string `json:"seriesExcludeRegex"`
-			VODIncludeRegex        string `json:"vodIncludeRegex"`
-			VODExcludeRegex        string `json:"vodExcludeRegex"`
-			LiveCategoryRegex      string `json:"liveCategoryRegex"`
-			VODCategoryRegex       string `json:"vodCategoryRegex"`
-			SeriesCategoryRegex    string `json:"seriesCategoryRegex"`
+			Name                   string            `json:"name"`
+			URL                    string            `json:"url"`
+			Order                  int               `json:"order"`
+			MaxConnections         int               `json:"maxConnections"`
+			MaxStreamTimeout       string            `json:"maxStreamTimeout"`
+			RetryDelay             string            `json:"retryDelay"`
+			MaxRetries             int               `json:"maxRetries"`
+			MaxFailuresBeforeBlock int               `json:"maxFailuresBeforeBlock"`
+			MinDataSize            int64             `json:"minDataSize"`
+			UserAgent              string            `json:"userAgent"`
+			ReqOrigin              string            `json:"reqOrigin"`
+			ReqReferrer            string            `json:"reqReferrer"`
+			Username               string            `json:"username"`
+			Password               string            `json:"password"`
+			LiveIncludeRegex       string            `json:"liveIncludeRegex"`
+			LiveExcludeRegex       string            `json:"liveExcludeRegex"`
+			SeriesIncludeRegex     string            `json:"seriesIncludeRegex"`
+			SeriesExcludeRegex     string            `json:"seriesExcludeRegex"`
+			VODIncludeRegex        string            `json:"vodIncludeRegex"`
+			VODExcludeRegex        string            `json:"vodExcludeRegex"`
+			LiveCategoryRegex      string            `json:"liveCategoryRegex"`
+			VODCategoryRegex       string            `json:"vodCategoryRegex"`
+			SeriesCategoryRegex    string            `json:"seriesCategoryRegex"`
+			GroupFilterMode        string            `json:"groupFilterMode"`
+			GroupFilterList        []string          `json:"groupFilterList"`
+			GroupFilterRegex       string            `json:"groupFilterRegex"`
+			ImportTypes            []string          `json:"importTypes"`
+			GroupTypeOverrides     map[string]string `json:"groupTypeOverrides"`
 		}
 		sources := make([]sourceOut, len(cfg.Sources))
 		for i := range cfg.Sources {
@@ -75,6 +80,9 @@ func handleGetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 				VODIncludeRegex: s.VODIncludeRegex, VODExcludeRegex: s.VODExcludeRegex,
 				LiveCategoryRegex: s.LiveCategoryRegex, VODCategoryRegex: s.VODCategoryRegex,
 				SeriesCategoryRegex: s.SeriesCategoryRegex,
+				GroupFilterMode:     s.GroupFilterMode, GroupFilterList: nonNilList(s.GroupFilterList),
+				GroupFilterRegex: s.GroupFilterRegex, ImportTypes: nonNilList(s.ImportTypes),
+				GroupTypeOverrides: nonNilMap(s.GroupTypeOverrides),
 			}
 		}
 
@@ -157,16 +165,29 @@ func handleSetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 			incoming.TMDBAPIKey = sp.Config.TMDBAPIKey
 		}
 		for i := range incoming.Sources {
-			if incoming.Sources[i].Password != maskedSecret {
+			if incoming.Sources[i].Password == maskedSecret {
+				incoming.Sources[i].Password = storedPassword(sp, &incoming.Sources[i])
+			}
+		}
+
+		// Reject a filter the import could not honour, naming the field so the
+		// UI can point at it; the engine would otherwise silently disable it.
+		// A source whose filters are byte-identical to the stored ones is let
+		// through with a warning: patterns saved before this validation existed
+		// must not block saving unrelated settings.
+		for i := range incoming.Sources {
+			src := &incoming.Sources[i]
+			err := src.NormalizeFilters()
+			if err == nil {
 				continue
 			}
-			incoming.Sources[i].Password = ""
-			for j := range sp.Config.Sources {
-				if sp.Config.Sources[j].Name == incoming.Sources[i].Name && sp.Config.Sources[j].URL == incoming.Sources[i].URL {
-					incoming.Sources[i].Password = sp.Config.Sources[j].Password
-					break
-				}
+			if stored := findStoredSource(sp, src); stored != nil && config.FiltersEqual(src, stored) {
+				addLogEntry("warning", fmt.Sprintf("Keeping already-stored filter that the import cannot honour: %v", err))
+				continue
 			}
+			addLogEntry("error", fmt.Sprintf("Rejected config: %v", err))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		// Ensure FFmpeg slices are never nil in the persisted config.
@@ -195,6 +216,11 @@ func handleSetConfig(sp *proxy.StreamProxy) http.HandlerFunc {
 		// Reload from SQLite and swap the live config pointer so the saved
 		// settings apply immediately, not only after a graceful restart
 		sp.Config = config.LoadConfig()
+
+		// Rate limiters are built per source URL and cached, so a changed
+		// max connections value would otherwise keep the old rate until the
+		// process restarted — which saving a source no longer does
+		sp.ReinitRateLimiters()
 
 		addLogEntry("info", "Configuration updated via admin interface")
 

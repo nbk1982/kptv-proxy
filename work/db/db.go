@@ -140,7 +140,33 @@ func initSchema(db *sql.DB) error {
 		vod_exc_regex    TEXT    NOT NULL DEFAULT '',
 		live_cat_regex   TEXT    NOT NULL DEFAULT '',
 		vod_cat_regex    TEXT    NOT NULL DEFAULT '',
-		series_cat_regex TEXT    NOT NULL DEFAULT ''
+		series_cat_regex TEXT    NOT NULL DEFAULT '',
+		group_filter_mode    TEXT NOT NULL DEFAULT '',
+		group_filter_list    TEXT NOT NULL DEFAULT '',
+		group_filter_regex   TEXT NOT NULL DEFAULT '',
+		import_types         TEXT NOT NULL DEFAULT '',
+		group_type_overrides TEXT NOT NULL DEFAULT ''
+	);
+
+	CREATE TABLE IF NOT EXISTS kp_source_groups (
+		source_url   TEXT    NOT NULL,
+		group_name   TEXT    NOT NULL,
+		content_type TEXT    NOT NULL DEFAULT '',
+		stream_count INTEGER NOT NULL DEFAULT 0,
+		kept_count   INTEGER NOT NULL DEFAULT 0,
+		samples      TEXT    NOT NULL DEFAULT '',
+		updated_at   TEXT    NOT NULL,
+		PRIMARY KEY (source_url, group_name)
+	);
+
+	CREATE TABLE IF NOT EXISTS kp_source_imports (
+		source_url   TEXT    PRIMARY KEY,
+		imported_at  TEXT    NOT NULL,
+		duration_ms  INTEGER NOT NULL DEFAULT 0,
+		stream_count INTEGER NOT NULL DEFAULT 0,
+		kept_count   INTEGER NOT NULL DEFAULT 0,
+		ok           INTEGER NOT NULL DEFAULT 1,
+		error        TEXT    NOT NULL DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS kp_epgs (
@@ -374,7 +400,10 @@ func migrateSourceColumns(db *sql.DB) error {
 		return err
 	}
 
-	for _, col := range []string{"live_cat_regex", "vod_cat_regex", "series_cat_regex"} {
+	for _, col := range []string{
+		"live_cat_regex", "vod_cat_regex", "series_cat_regex",
+		"group_filter_mode", "group_filter_list", "group_filter_regex", "import_types", "group_type_overrides",
+	} {
 		if cols[col] {
 			continue
 		}
